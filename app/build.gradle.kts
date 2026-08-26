@@ -66,4 +66,7 @@ dependencies {
 
     // OkHttp for direct trigger calls / FCM API
     implementation(libs.okhttp)
+
+    // Unit Testing
+    testImplementation("junit:junit:4.13.2")
 }
