@@ -7,7 +7,8 @@ data class PairedContact(
     val id: String,
     val name: String,
     val fcmToken: String,
-    val passphrase: String,
+    val publicKeyBase64: String = "",
+    val passphrase: String = "",
     val addedAt: Long = System.currentTimeMillis()
 ) {
     fun toJson(): JSONObject {
@@ -15,6 +16,7 @@ data class PairedContact(
             put("id", id)
             put("name", name)
             put("fcmToken", fcmToken)
+            put("publicKeyBase64", publicKeyBase64)
             put("passphrase", passphrase)
             put("addedAt", addedAt)
         }
@@ -26,6 +28,7 @@ data class PairedContact(
                 id = json.getString("id"),
                 name = json.getString("name"),
                 fcmToken = json.getString("fcmToken"),
+                publicKeyBase64 = json.optString("publicKeyBase64", ""),
                 passphrase = json.optString("passphrase", ""),
                 addedAt = json.optLong("addedAt", System.currentTimeMillis())
             )
@@ -38,7 +41,7 @@ data class PairedContact(
         }
 
         fun listFromJsonString(jsonString: String?): List<PairedContact> {
-            if (jsonString.isNull_or_blank()) return emptyList()
+            if (jsonString.isNullOrBlank()) return emptyList()
             return try {
                 val array = JSONArray(jsonString)
                 val list = mutableListOf<PairedContact>()
@@ -52,5 +55,3 @@ data class PairedContact(
         }
     }
 }
-
-private fun String?.isNull_or_blank(): Boolean = this == null || this.trim().isEmpty()
