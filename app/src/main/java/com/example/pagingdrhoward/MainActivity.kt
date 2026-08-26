@@ -9,7 +9,6 @@ import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -28,37 +27,34 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.pagingdrhoward.data.DefaultPagerRepository
 import com.example.pagingdrhoward.network.FcmSender
 import com.example.pagingdrhoward.service.EmergencyPagerService
 import com.example.pagingdrhoward.util.DndHelper
+import com.example.pagingdrhoward.viewmodel.MainUiState
+import com.example.pagingdrhoward.viewmodel.MainViewModel
 import com.google.firebase.messaging.FirebaseMessaging
 
 class MainActivity : ComponentActivity() {
 
-    private var fcmTokenState = mutableStateOf("Fetching token...")
-    private var isDndAccessGranted = mutableStateOf(false)
-    private var familyPassphraseState = mutableStateOf("")
+    private lateinit var viewModel: MainViewModel
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        // Initialize Architecture Layer (Repository + ViewModel)
+        val prefs = getSharedPreferences(DefaultPagerRepository.PREF_NAME, MODE_PRIVATE)
+        val repository = DefaultPagerRepository(prefs)
+        viewModel = MainViewModel(repository)
+
         // Register DND-bypassing notification channel
         DndHelper.createEmergencyNotificationChannel(this)
 
-        val prefs = getSharedPreferences("pager_prefs", MODE_PRIVATE)
-        familyPassphraseState.value = prefs.getString("family_passphrase", "") ?: ""
-
-        val savedToken = prefs.getString("fcm_token", null)
-        if (savedToken != null) {
-            fcmTokenState.value = savedToken
-        } else {
+        // Fetch FCM token if not present
+        if (repository.getFcmToken() == null) {
             FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
-                if (task.isSuccessful) {
-                    val token = task.result
-                    fcmTokenState.value = token
-                    prefs.edit().putString("fcm_token", token).apply()
-                } else {
-                    fcmTokenState.value = "Failed to fetch token: ${task.exception?.message}"
+                if (task.isSuccessful && task.result != null) {
+                    viewModel.updateFcmToken(task.result)
                 }
             }
         }
@@ -66,20 +62,16 @@ class MainActivity : ComponentActivity() {
         setContent {
             MaterialTheme {
                 MainPagerApp(
-                    fcmToken = fcmTokenState.value,
-                    isDndGranted = isDndAccessGranted.value,
-                    passphrase = familyPassphraseState.value,
-                    onSavePassphrase = { newPassphrase ->
-                        prefs.edit().putString("family_passphrase", newPassphrase).apply()
-                        familyPassphraseState.value = newPassphrase
-                        Toast.makeText(this, "Family Security Key Saved!", Toast.LENGTH_SHORT).show()
-                    },
+                    uiState = viewModel.uiState,
+                    onSavePassphrase = { passphrase -> viewModel.saveFamilyPassphrase(passphrase) },
                     onGrantDnd = { DndHelper.openDndSettings(this) },
                     onTestAlarm = { triggerLocalTestPage() },
-                    onCopyToken = { copyToClipboard(fcmTokenState.value) },
-                    onSendPage = { targetToken, senderName, message, passphrase, serverKey ->
-                        sendRemotePage(targetToken, senderName, message, passphrase, serverKey)
-                    }
+                    onCopyToken = { copyToClipboard(viewModel.uiState.fcmToken) },
+                    onUpdateTargetToken = { viewModel.updateTargetToken(it) },
+                    onUpdateSenderName = { viewModel.updateSenderName(it) },
+                    onUpdateMessageText = { viewModel.updateMessageText(it) },
+                    onUpdateServerKey = { viewModel.updateServerKey(it) },
+                    onSendPage = { sendRemotePage() }
                 )
             }
         }
@@ -87,7 +79,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        isDndAccessGranted.value = DndHelper.hasDndAccess(this)
+        viewModel.setDndGranted(DndHelper.hasDndAccess(this))
     }
 
     private fun triggerLocalTestPage() {
@@ -110,18 +102,21 @@ class MainActivity : ComponentActivity() {
         Toast.makeText(this, "Device token copied to clipboard!", Toast.LENGTH_SHORT).show()
     }
 
-    private fun sendRemotePage(
-        targetToken: String,
-        senderName: String,
-        message: String,
-        passphrase: String,
-        serverKey: String
-    ) {
-        if (targetToken.isBlank()) {
-            Toast.makeText(this, "Please enter recipient device token", Toast.LENGTH_SHORT).show()
+    private fun sendRemotePage() {
+        val (isValid, errorMsg) = viewModel.validatePageSubmission()
+        if (!isValid) {
+            Toast.makeText(this, errorMsg ?: "Invalid input", Toast.LENGTH_SHORT).show()
             return
         }
-        FcmSender.sendSecurePage(targetToken, senderName, message, passphrase, serverKey) { success, resultMsg ->
+
+        val state = viewModel.uiState
+        FcmSender.sendSecurePage(
+            targetToken = state.targetTokenInput,
+            senderName = state.senderNameInput,
+            messageText = state.messageTextInput,
+            familyPassphrase = state.familyPassphrase,
+            serverKey = state.serverKeyInput
+        ) { success, resultMsg ->
             runOnUiThread {
                 Toast.makeText(this, resultMsg, Toast.LENGTH_LONG).show()
             }
@@ -132,14 +127,16 @@ class MainActivity : ComponentActivity() {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainPagerApp(
-    fcmToken: String,
-    isDndGranted: Boolean,
-    passphrase: String,
+    uiState: MainUiState,
     onSavePassphrase: (String) -> Unit,
     onGrantDnd: () -> Unit,
     onTestAlarm: () -> Unit,
     onCopyToken: () -> Unit,
-    onSendPage: (targetToken: String, senderName: String, message: String, passphrase: String, serverKey: String) -> Unit
+    onUpdateTargetToken: (String) -> Unit,
+    onUpdateSenderName: (String) -> Unit,
+    onUpdateMessageText: (String) -> Unit,
+    onUpdateServerKey: (String) -> Unit,
+    onSendPage: () -> Unit
 ) {
     var selectedTab by remember { mutableStateOf(0) }
 
@@ -173,9 +170,7 @@ fun MainPagerApp(
         Box(modifier = Modifier.padding(paddingValues)) {
             if (selectedTab == 0) {
                 RecipientSetupScreen(
-                    fcmToken = fcmToken,
-                    isDndGranted = isDndGranted,
-                    passphrase = passphrase,
+                    uiState = uiState,
                     onSavePassphrase = onSavePassphrase,
                     onGrantDnd = onGrantDnd,
                     onTestAlarm = onTestAlarm,
@@ -183,7 +178,11 @@ fun MainPagerApp(
                 )
             } else {
                 SendPageScreen(
-                    savedPassphrase = passphrase,
+                    uiState = uiState,
+                    onUpdateTargetToken = onUpdateTargetToken,
+                    onUpdateSenderName = onUpdateSenderName,
+                    onUpdateMessageText = onUpdateMessageText,
+                    onUpdateServerKey = onUpdateServerKey,
                     onSendPage = onSendPage
                 )
             }
@@ -193,15 +192,13 @@ fun MainPagerApp(
 
 @Composable
 fun RecipientSetupScreen(
-    fcmToken: String,
-    isDndGranted: Boolean,
-    passphrase: String,
+    uiState: MainUiState,
     onSavePassphrase: (String) -> Unit,
     onGrantDnd: () -> Unit,
     onTestAlarm: () -> Unit,
     onCopyToken: () -> Unit
 ) {
-    var keyInput by remember(passphrase) { mutableStateOf(passphrase) }
+    var keyInput by remember(uiState.familyPassphrase) { mutableStateOf(uiState.familyPassphrase) }
 
     Column(
         modifier = Modifier
@@ -209,13 +206,9 @@ fun RecipientSetupScreen(
             .padding(16.dp)
             .verticalScroll(rememberScrollState())
     ) {
+        Text("Device Pager Setup", fontSize = 22.sp, fontWeight = FontWeight.Bold)
         Text(
-            text = "Device Pager Setup",
-            fontSize = 22.sp,
-            fontWeight = FontWeight.Bold
-        )
-        Text(
-            text = "Ensure Do Not Disturb access is enabled and configure your Family Security Key.",
+            "Ensure Do Not Disturb access is enabled and configure your Family Security Key.",
             fontSize = 14.sp,
             color = Color.Gray,
             modifier = Modifier.padding(top = 4.dp, bottom = 16.dp)
@@ -225,7 +218,7 @@ fun RecipientSetupScreen(
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(
-                containerColor = if (isDndGranted) Color(0xFFE8F5E9) else Color(0xFFFFEBEE)
+                containerColor = if (uiState.isDndAccessGranted) Color(0xFFE8F5E9) else Color(0xFFFFEBEE)
             )
         ) {
             Row(
@@ -233,20 +226,20 @@ fun RecipientSetupScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Icon(
-                    imageVector = if (isDndGranted) Icons.Default.CheckCircle else Icons.Default.Warning,
+                    imageVector = if (uiState.isDndAccessGranted) Icons.Default.CheckCircle else Icons.Default.Warning,
                     contentDescription = null,
-                    tint = if (isDndGranted) Color(0xFF2E7D32) else Color(0xFFC62828),
+                    tint = if (uiState.isDndAccessGranted) Color(0xFF2E7D32) else Color(0xFFC62828),
                     modifier = Modifier.size(32.dp)
                 )
                 Spacer(modifier = Modifier.width(16.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = if (isDndGranted) "DND Override Enabled" else "DND Permission Needed",
+                        text = if (uiState.isDndAccessGranted) "DND Override Enabled" else "DND Permission Needed",
                         fontWeight = FontWeight.Bold,
-                        color = if (isDndGranted) Color(0xFF2E7D32) else Color(0xFFC62828)
+                        color = if (uiState.isDndAccessGranted) Color(0xFF2E7D32) else Color(0xFFC62828)
                     )
                     Text(
-                        text = if (isDndGranted) "Phone will ring even during Do Not Disturb." else "Tap below to allow app to bypass DND mode.",
+                        text = if (uiState.isDndAccessGranted) "Phone will ring even during Do Not Disturb." else "Tap below to allow app to bypass DND mode.",
                         fontSize = 12.sp,
                         color = Color.DarkGray
                     )
@@ -254,7 +247,7 @@ fun RecipientSetupScreen(
             }
         }
 
-        if (!isDndGranted) {
+        if (!uiState.isDndAccessGranted) {
             Spacer(modifier = Modifier.height(12.dp))
             Button(
                 onClick = onGrantDnd,
@@ -298,7 +291,7 @@ fun RecipientSetupScreen(
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Text(
-                    text = fcmToken,
+                    text = uiState.fcmToken,
                     fontSize = 12.sp,
                     fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
                     maxLines = 4
@@ -333,15 +326,13 @@ fun RecipientSetupScreen(
 
 @Composable
 fun SendPageScreen(
-    savedPassphrase: String,
-    onSendPage: (targetToken: String, senderName: String, message: String, passphrase: String, serverKey: String) -> Unit
+    uiState: MainUiState,
+    onUpdateTargetToken: (String) -> Unit,
+    onUpdateSenderName: (String) -> Unit,
+    onUpdateMessageText: (String) -> Unit,
+    onUpdateServerKey: (String) -> Unit,
+    onSendPage: () -> Unit
 ) {
-    var targetToken by remember { mutableStateOf("") }
-    var senderName by remember { mutableStateOf("Dad") }
-    var messageText by remember { mutableStateOf("URGENT: Please call me ASAP!") }
-    var passphraseInput by remember(savedPassphrase) { mutableStateOf(savedPassphrase) }
-    var serverKey by remember { mutableStateOf("") }
-
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -354,8 +345,8 @@ fun SendPageScreen(
         Spacer(modifier = Modifier.height(16.dp))
 
         OutlinedTextField(
-            value = targetToken,
-            onValueChange = { targetToken = it },
+            value = uiState.targetTokenInput,
+            onValueChange = onUpdateTargetToken,
             label = { Text("Recipient FCM Token") },
             modifier = Modifier.fillMaxWidth(),
             maxLines = 3
@@ -364,8 +355,8 @@ fun SendPageScreen(
         Spacer(modifier = Modifier.height(12.dp))
 
         OutlinedTextField(
-            value = senderName,
-            onValueChange = { senderName = it },
+            value = uiState.senderNameInput,
+            onValueChange = onUpdateSenderName,
             label = { Text("Your Name (Sender)") },
             modifier = Modifier.fillMaxWidth()
         )
@@ -373,8 +364,8 @@ fun SendPageScreen(
         Spacer(modifier = Modifier.height(12.dp))
 
         OutlinedTextField(
-            value = messageText,
-            onValueChange = { messageText = it },
+            value = uiState.messageTextInput,
+            onValueChange = onUpdateMessageText,
             label = { Text("Alert Message") },
             modifier = Modifier.fillMaxWidth()
         )
@@ -382,19 +373,8 @@ fun SendPageScreen(
         Spacer(modifier = Modifier.height(12.dp))
 
         OutlinedTextField(
-            value = passphraseInput,
-            onValueChange = { passphraseInput = it },
-            label = { Text("Family Security Key") },
-            leadingIcon = { Icon(Icons.Default.Lock, contentDescription = null) },
-            visualTransformation = PasswordVisualTransformation(),
-            modifier = Modifier.fillMaxWidth()
-        )
-
-        Spacer(modifier = Modifier.height(12.dp))
-
-        OutlinedTextField(
-            value = serverKey,
-            onValueChange = { serverKey = it },
+            value = uiState.serverKeyInput,
+            onValueChange = onUpdateServerKey,
             label = { Text("Firebase Server Key (Optional)") },
             modifier = Modifier.fillMaxWidth()
         )
@@ -402,7 +382,7 @@ fun SendPageScreen(
         Spacer(modifier = Modifier.height(24.dp))
 
         Button(
-            onClick = { onSendPage(targetToken, senderName, messageText, passphraseInput, serverKey) },
+            onClick = onSendPage,
             modifier = Modifier
                 .fillMaxWidth()
                 .height(56.dp),

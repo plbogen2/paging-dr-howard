@@ -6,9 +6,9 @@ import org.junit.Test
 
 class SecurityUtilsTest {
 
-    private val secretPassphrase = "FamilySecretKey123!"
+    private val secretPassphrase = "FamilySecretKey123!@#"
     private val wrongPassphrase = "WrongSecretKey456!"
-    private val testMessage = "URGENT: Emergency Page - Call Dad ASAP!"
+    private val testMessage = "URGENT: Emergency Page 🚨 - Call Dad ASAP! 📞"
     private val senderName = "Dad"
     private val timestamp = "1724694400000"
 
@@ -43,7 +43,15 @@ class SecurityUtilsTest {
     }
 
     @Test
-    fun `test AES encryption and decryption roundtrip`() {
+    fun `test HMAC signature fails on blank inputs`() {
+        val signature = SecurityUtils.generateSignature("", "data")
+        val isValid = SecurityUtils.verifySignature("", "data", signature)
+
+        assertFalse("Signature verification should return false for blank passphrase", isValid)
+    }
+
+    @Test
+    fun `test AES encryption and decryption roundtrip with Unicode and Emojis`() {
         val encryptedText = SecurityUtils.encrypt(secretPassphrase, testMessage)
         assertNotEquals("Encrypted text should differ from original plaintext", testMessage, encryptedText)
 
@@ -57,5 +65,13 @@ class SecurityUtilsTest {
         val decryptedText = SecurityUtils.decrypt(wrongPassphrase, encryptedText)
 
         assertNotEquals("Decrypted message with wrong passphrase should not match original plaintext", testMessage, decryptedText)
+    }
+
+    @Test
+    fun `test AES decryption handles invalid base64 gracefully`() {
+        val invalidBase64 = "ThisIsNotBase64!!!=="
+        val decrypted = SecurityUtils.decrypt(secretPassphrase, invalidBase64)
+
+        assertEquals("Decryption error should fallback gracefully", invalidBase64, decrypted)
     }
 }
