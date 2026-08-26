@@ -7,12 +7,14 @@ android {
     namespace = "com.example.pagingdrhoward"
     compileSdk = 34
 
+    val buildNumber = System.getenv("BUILD_NUMBER")?.toIntOrNull() ?: 1001
+
     defaultConfig {
         applicationId = "com.example.pagingdrhoward"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = buildNumber
+        versionName = "1.0.0.$buildNumber"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
