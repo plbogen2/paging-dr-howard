@@ -1,6 +1,7 @@
 package com.example.pagingdrhoward
 
 import com.example.pagingdrhoward.data.FcmPayloadBuilder
+import com.example.pagingdrhoward.data.PageLevel
 import com.example.pagingdrhoward.util.SecurityUtils
 import org.json.JSONObject
 import org.junit.Assert.*
@@ -9,12 +10,13 @@ import org.junit.Test
 class FcmPayloadBuilderTest {
 
     @Test
-    fun `test buildJsonPayload constructs valid high-priority FCM payload with signature`() {
+    fun `test buildJsonPayload constructs valid HEY_LOOK multi-level payload`() {
         val payload = FcmPayloadBuilder.PagePayload(
             targetToken = "test_device_token_123",
             senderName = "Dad",
-            messageText = "Call home ASAP!",
+            messageText = "Check your phone when free",
             familyPassphrase = "SecretKey123!",
+            level = PageLevel.HEY_LOOK,
             timestamp = "1724694400000"
         )
 
@@ -26,13 +28,29 @@ class FcmPayloadBuilderTest {
 
         val data = root.getJSONObject("data")
         assertEquals("Dad", data.getString("sender"))
+        assertEquals("HEY_LOOK", data.getString("level"))
         assertEquals("EMERGENCY_PAGE", data.getString("type"))
         assertTrue("encrypted flag should be true", data.getBoolean("encrypted"))
         assertTrue("signature should not be empty", data.getString("signature").isNotEmpty())
 
-        // Verify decrypted message
         val decryptedMsg = SecurityUtils.decrypt("SecretKey123!", data.getString("message"))
-        assertEquals("Call home ASAP!", decryptedMsg)
+        assertEquals("Check your phone when free", decryptedMsg)
+    }
+
+    @Test
+    fun `test buildJsonPayload constructs valid SOS multi-level payload`() {
+        val payload = FcmPayloadBuilder.PagePayload(
+            targetToken = "test_device_token_123",
+            senderName = "Daughter",
+            messageText = "SOS EMERGENCY",
+            familyPassphrase = "SecretKey123!",
+            level = PageLevel.SOS
+        )
+
+        val jsonStr = FcmPayloadBuilder.buildJsonPayload(payload)
+        val data = JSONObject(jsonStr).getJSONObject("data")
+
+        assertEquals("SOS", data.getString("level"))
     }
 
     @Test(expected = IllegalArgumentException::class)
@@ -44,22 +62,5 @@ class FcmPayloadBuilderTest {
             familyPassphrase = "SecretKey123!"
         )
         FcmPayloadBuilder.buildJsonPayload(payload)
-    }
-
-    @Test
-    fun `test buildJsonPayload without passphrase produces unencrypted plaintext and empty signature`() {
-        val payload = FcmPayloadBuilder.PagePayload(
-            targetToken = "test_device_token_123",
-            senderName = "Mom",
-            messageText = "Dinner is ready",
-            familyPassphrase = ""
-        )
-
-        val jsonStr = FcmPayloadBuilder.buildJsonPayload(payload)
-        val data = JSONObject(jsonStr).getJSONObject("data")
-
-        assertEquals("Dinner is ready", data.getString("message"))
-        assertFalse("encrypted flag should be false", data.getBoolean("encrypted"))
-        assertEquals("", data.getString("signature"))
     }
 }

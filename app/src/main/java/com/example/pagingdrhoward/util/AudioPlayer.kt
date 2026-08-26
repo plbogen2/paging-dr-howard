@@ -7,6 +7,7 @@ import android.media.MediaPlayer
 import android.media.RingtoneManager
 import android.net.Uri
 import android.util.Log
+import com.example.pagingdrhoward.data.PageLevel
 
 object AudioPlayer {
     private const val TAG = "AudioPlayer"
@@ -14,26 +15,26 @@ object AudioPlayer {
     private var originalVolume: Int = -1
 
     /**
-     * Starts playing emergency alarm audio at maximum volume using STREAM_ALARM.
+     * Starts playing emergency alarm audio configured for specific PageLevel.
      */
-    fun startEmergencyAlarm(context: Context) {
-        if (mediaPlayer?.isPlaying == true) return
+    fun startEmergencyAlarm(context: Context, level: PageLevel = PageLevel.SOS) {
+        if (mediaPlayer?.isPlaying == true) stopEmergencyAlarm(context)
 
         try {
             val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
 
-            // 1. Save original alarm volume and set STREAM_ALARM to maximum
+            // Save original alarm volume and set STREAM_ALARM to max for SOS, or high for HEY_LOOK
             originalVolume = audioManager.getStreamVolume(AudioManager.STREAM_ALARM)
             val maxVolume = audioManager.getStreamMaxVolume(AudioManager.STREAM_ALARM)
-            audioManager.setStreamVolume(AudioManager.STREAM_ALARM, maxVolume, 0)
+            val targetVolume = if (level == PageLevel.SOS) maxVolume else (maxVolume * 0.75).toInt()
+            audioManager.setStreamVolume(AudioManager.STREAM_ALARM, targetVolume, 0)
 
-            // 2. Select default alarm tone (or fallback to ringtone)
-            var alarmUri: Uri? = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
+            val alarmType = if (level == PageLevel.HEY_LOOK) RingtoneManager.TYPE_NOTIFICATION else RingtoneManager.TYPE_ALARM
+            var alarmUri: Uri? = RingtoneManager.getDefaultUri(alarmType)
             if (alarmUri == null) {
                 alarmUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
             }
 
-            // 3. Configure MediaPlayer with AudioAttributes.USAGE_ALARM
             mediaPlayer = MediaPlayer().apply {
                 setDataSource(context, alarmUri!!)
                 setAudioAttributes(
@@ -42,13 +43,13 @@ object AudioPlayer {
                         .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
                         .build()
                 )
-                isLooping = true
+                isLooping = level.isLoopingSound
                 prepare()
                 start()
             }
-            Log.d(TAG, "Emergency alarm audio started at volume level: $maxVolume")
+            Log.d(TAG, "Audio started for ${level.name} at volume: $targetVolume")
         } catch (e: Exception) {
-            Log.e(TAG, "Error starting emergency alarm sound", e)
+            Log.e(TAG, "Error starting alarm sound", e)
         }
     }
 
@@ -65,15 +66,14 @@ object AudioPlayer {
             }
             mediaPlayer = null
 
-            // Restore original volume if saved
             if (originalVolume != -1) {
                 val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
                 audioManager.setStreamVolume(AudioManager.STREAM_ALARM, originalVolume, 0)
                 originalVolume = -1
             }
-            Log.d(TAG, "Emergency alarm sound stopped.")
+            Log.d(TAG, "Alarm sound stopped.")
         } catch (e: Exception) {
-            Log.e(TAG, "Error stopping emergency alarm sound", e)
+            Log.e(TAG, "Error stopping alarm sound", e)
         }
     }
 }

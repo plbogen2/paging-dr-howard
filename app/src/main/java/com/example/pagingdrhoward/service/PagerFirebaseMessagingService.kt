@@ -4,6 +4,7 @@ import android.content.Intent
 import android.os.Build
 import android.util.Log
 import com.example.pagingdrhoward.data.DefaultPagerRepository
+import com.example.pagingdrhoward.data.PageLevel
 import com.example.pagingdrhoward.data.PairedContact
 import com.example.pagingdrhoward.util.SecurityUtils
 import com.google.firebase.messaging.FirebaseMessagingService
@@ -33,12 +34,13 @@ class PagerFirebaseMessagingService : FirebaseMessagingService() {
         val messageType = data["type"] ?: "EMERGENCY_PAGE"
         val sender = data["sender"] ?: "Family Member"
         val rawMessage = data["message"] ?: "URGENT: Emergency Page!"
+        val levelCode = data["level"] ?: PageLevel.SOS.code
+        val pageLevel = PageLevel.fromCode(levelCode)
         val timestamp = data["timestamp"] ?: ""
         val signature = data["signature"] ?: ""
         val senderToken = data["senderToken"] ?: ""
         val isEncrypted = data["encrypted"]?.toBoolean() ?: false
 
-        // Handle Bidirectional Handshake Auto-Pairing
         if (messageType == "PAIRING_HANDSHAKE" && senderToken.isNotBlank()) {
             val contact = PairedContact(
                 id = UUID.randomUUID().toString(),
@@ -51,7 +53,6 @@ class PagerFirebaseMessagingService : FirebaseMessagingService() {
             return
         }
 
-        // If Family Security Key is configured, enforce cryptographic signature verification
         if (familyPassphrase.isNotBlank()) {
             if (signature.isBlank()) {
                 Log.w(TAG, "REJECTED: Incoming page missing security signature.")
@@ -64,7 +65,7 @@ class PagerFirebaseMessagingService : FirebaseMessagingService() {
                 rawMessage
             }
 
-            val verificationData = "$sender|$decryptedMessage|$timestamp"
+            val verificationData = "$sender|$decryptedMessage|${pageLevel.code}|$timestamp"
             val isValid = SecurityUtils.verifySignature(familyPassphrase, verificationData, signature)
 
             if (!isValid) {
@@ -72,7 +73,6 @@ class PagerFirebaseMessagingService : FirebaseMessagingService() {
                 return
             }
 
-            // Auto-save/update sender token if provided for 1-tap reply
             if (senderToken.isNotBlank()) {
                 val contact = PairedContact(
                     id = UUID.randomUUID().toString(),
@@ -83,18 +83,18 @@ class PagerFirebaseMessagingService : FirebaseMessagingService() {
                 repository.savePairedContact(contact)
             }
 
-            triggerEmergencyAlarm(sender, decryptedMessage)
+            triggerEmergencyAlarm(sender, decryptedMessage, pageLevel)
         } else {
-            // Unsecured mode
-            triggerEmergencyAlarm(sender, rawMessage)
+            triggerEmergencyAlarm(sender, rawMessage, pageLevel)
         }
     }
 
-    private fun triggerEmergencyAlarm(sender: String, message: String) {
+    private fun triggerEmergencyAlarm(sender: String, message: String, level: PageLevel) {
         val serviceIntent = Intent(this, EmergencyPagerService::class.java).apply {
             action = EmergencyPagerService.ACTION_START_ALARM
             putExtra("EXTRA_SENDER", sender)
             putExtra("EXTRA_MESSAGE", message)
+            putExtra("EXTRA_LEVEL", level.code)
         }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {

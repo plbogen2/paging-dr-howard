@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.NotificationsActive
+import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -21,6 +22,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.pagingdrhoward.data.PageLevel
 import com.example.pagingdrhoward.service.EmergencyPagerService
 
 class EmergencyAlertActivity : ComponentActivity() {
@@ -28,7 +30,6 @@ class EmergencyAlertActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Ensure screen turns on and bypasses lockscreen for critical alert
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
             setShowWhenLocked(true)
             setTurnScreenOn(true)
@@ -43,9 +44,12 @@ class EmergencyAlertActivity : ComponentActivity() {
 
         val senderName = intent.getStringExtra("EXTRA_SENDER") ?: "Family Member"
         val messageText = intent.getStringExtra("EXTRA_MESSAGE") ?: "URGENT: Please respond immediately!"
+        val levelCode = intent.getStringExtra("EXTRA_LEVEL")
+        val pageLevel = PageLevel.fromCode(levelCode)
 
         setContent {
             EmergencyAlertScreen(
+                pageLevel = pageLevel,
                 senderName = senderName,
                 messageText = messageText,
                 onDismiss = { dismissPage() }
@@ -54,7 +58,6 @@ class EmergencyAlertActivity : ComponentActivity() {
     }
 
     private fun dismissPage() {
-        // Stop background alarm service
         val stopServiceIntent = Intent(this, EmergencyPagerService::class.java).apply {
             action = EmergencyPagerService.ACTION_STOP_ALARM
         }
@@ -63,10 +66,11 @@ class EmergencyAlertActivity : ComponentActivity() {
     }
 
     companion object {
-        fun createIntent(context: Context, sender: String?, message: String?): Intent {
+        fun createIntent(context: Context, sender: String?, message: String?, level: PageLevel): Intent {
             return Intent(context, EmergencyAlertActivity::class.java).apply {
                 putExtra("EXTRA_SENDER", sender)
                 putExtra("EXTRA_MESSAGE", message)
+                putExtra("EXTRA_LEVEL", level.code)
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
             }
         }
@@ -74,10 +78,12 @@ class EmergencyAlertActivity : ComponentActivity() {
 }
 
 @Composable
-fun EmergencyAlertScreen(senderName: String, messageText: String, onDismiss: () -> Unit) {
+fun EmergencyAlertScreen(pageLevel: PageLevel, senderName: String, messageText: String, onDismiss: () -> Unit) {
+    val backgroundColor = Color(pageLevel.colorHex)
+
     Surface(
         modifier = Modifier.fillMaxSize(),
-        color = Color(0xFFD32F2F) // Deep Red background for high priority alert
+        color = backgroundColor
     ) {
         Column(
             modifier = Modifier
@@ -96,8 +102,8 @@ fun EmergencyAlertScreen(senderName: String, messageText: String, onDismiss: () 
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
-                        imageVector = Icons.Default.NotificationsActive,
-                        contentDescription = "Emergency Alert",
+                        imageVector = if (pageLevel == PageLevel.HEY_LOOK) Icons.Default.Visibility else Icons.Default.NotificationsActive,
+                        contentDescription = "Alert Level",
                         tint = Color.White,
                         modifier = Modifier.size(64.dp)
                     )
@@ -106,11 +112,12 @@ fun EmergencyAlertScreen(senderName: String, messageText: String, onDismiss: () 
                 Spacer(modifier = Modifier.height(24.dp))
 
                 Text(
-                    text = "EMERGENCY PAGE",
+                    text = pageLevel.title.uppercase(),
                     fontSize = 28.sp,
                     fontWeight = FontWeight.Bold,
                     color = Color.White,
-                    letterSpacing = 2.sp
+                    letterSpacing = 2.sp,
+                    textAlign = TextAlign.Center
                 )
 
                 Spacer(modifier = Modifier.height(12.dp))
@@ -147,10 +154,10 @@ fun EmergencyAlertScreen(senderName: String, messageText: String, onDismiss: () 
                     .height(64.dp)
             ) {
                 Text(
-                    text = "DISMISS ALARM",
+                    text = "DISMISS ALERT",
                     fontSize = 20.sp,
                     fontWeight = FontWeight.Bold,
-                    color = Color(0xFFD32F2F)
+                    color = backgroundColor
                 )
             }
         }

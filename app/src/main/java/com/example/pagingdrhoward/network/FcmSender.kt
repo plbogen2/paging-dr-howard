@@ -1,7 +1,8 @@
 package com.example.pagingdrhoward.network
 
 import android.util.Log
-import com.example.pagingdrhoward.util.SecurityUtils
+import com.example.pagingdrhoward.data.FcmPayloadBuilder
+import com.example.pagingdrhoward.data.PageLevel
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.MediaType.Companion.toMediaType
@@ -9,7 +10,6 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
-import org.json.JSONObject
 import java.io.IOException
 
 object FcmSender {
@@ -17,48 +17,28 @@ object FcmSender {
     private val client = OkHttpClient()
 
     /**
-     * Sends a high-priority, cryptographically signed & encrypted FCM page payload.
+     * Sends a high-priority, cryptographically signed & encrypted FCM page payload with multi-level paging.
      */
     fun sendSecurePage(
         targetToken: String,
         senderName: String,
         messageText: String,
         familyPassphrase: String,
+        pageLevel: PageLevel = PageLevel.SOS,
         serverKey: String,
         onResult: (Boolean, String) -> Unit
     ) {
         try {
-            val timestamp = System.currentTimeMillis().toString()
-            val rawPayload = "$senderName|$messageText|$timestamp"
-            
-            // 1. Encrypt message and generate HMAC signature using shared family passphrase
-            val encryptedMessage = if (familyPassphrase.isNotBlank()) {
-                SecurityUtils.encrypt(familyPassphrase, messageText)
-            } else {
-                messageText
-            }
+            val payload = FcmPayloadBuilder.PagePayload(
+                targetToken = targetToken,
+                senderName = senderName,
+                messageText = messageText,
+                familyPassphrase = familyPassphrase,
+                level = pageLevel
+            )
 
-            val signature = if (familyPassphrase.isNotBlank()) {
-                SecurityUtils.generateSignature(familyPassphrase, rawPayload)
-            } else {
-                ""
-            }
-
-            // 2. Build JSON payload
-            val jsonBody = JSONObject().apply {
-                put("to", targetToken)
-                put("priority", "high")
-                put("data", JSONObject().apply {
-                    put("sender", senderName)
-                    put("message", encryptedMessage)
-                    put("timestamp", timestamp)
-                    put("signature", signature)
-                    put("encrypted", familyPassphrase.isNotBlank())
-                    put("type", "EMERGENCY_PAGE")
-                })
-            }
-
-            val requestBody = jsonBody.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
+            val jsonBodyStr = FcmPayloadBuilder.buildJsonPayload(payload)
+            val requestBody = jsonBodyStr.toRequestBody("application/json; charset=utf-8".toMediaType())
             val request = Request.Builder()
                 .url("https://fcm.googleapis.com/fcm/send")
                 .addHeader("Authorization", "key=$serverKey")
@@ -76,7 +56,7 @@ object FcmSender {
                     val responseStr = response.body?.string() ?: ""
                     val isSuccess = response.isSuccessful
                     Log.d(TAG, "FCM send response ($response.code): $responseStr")
-                    onResult(isSuccess, if (isSuccess) "Secure Page Sent Successfully!" else "FCM Error ($response.code): $responseStr")
+                    onResult(isSuccess, if (isSuccess) "${pageLevel.title} Page Sent!" else "FCM Error ($response.code): $responseStr")
                 }
             })
         } catch (e: Exception) {

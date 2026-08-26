@@ -24,6 +24,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.pagingdrhoward.data.DefaultPagerRepository
+import com.example.pagingdrhoward.data.PageLevel
 import com.example.pagingdrhoward.data.PairedContact
 import com.example.pagingdrhoward.network.FcmSender
 import com.example.pagingdrhoward.service.EmergencyPagerService
@@ -65,11 +66,7 @@ class MainActivity : ComponentActivity() {
                     onGrantDnd = { DndHelper.openDndSettings(this) },
                     onTestAlarm = { triggerLocalTestPage() },
                     onCopyText = { label, text -> copyToClipboard(label, text) },
-                    onUpdateTargetToken = { viewModel.updateTargetToken(it) },
-                    onUpdateSenderName = { viewModel.updateSenderName(it) },
-                    onUpdateMessageText = { viewModel.updateMessageText(it) },
-                    onUpdateServerKey = { viewModel.updateServerKey(it) },
-                    onSendPage = { targetToken -> sendRemotePage(targetToken) }
+                    onSendPage = { targetToken, level -> sendRemotePage(targetToken, level) }
                 )
             }
         }
@@ -85,6 +82,7 @@ class MainActivity : ComponentActivity() {
             action = EmergencyPagerService.ACTION_START_ALARM
             putExtra("EXTRA_SENDER", "Self-Test")
             putExtra("EXTRA_MESSAGE", "This is a test of the emergency alarm sound!")
+            putExtra("EXTRA_LEVEL", PageLevel.SOS.code)
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             startForegroundService(intent)
@@ -100,8 +98,7 @@ class MainActivity : ComponentActivity() {
         Toast.makeText(this, "$label copied to clipboard!", Toast.LENGTH_SHORT).show()
     }
 
-    private fun sendRemotePage(overrideTargetToken: String? = null) {
-        val targetToken = overrideTargetToken ?: viewModel.uiState.targetTokenInput
+    private fun sendRemotePage(targetToken: String, pageLevel: PageLevel) {
         if (targetToken.isBlank()) {
             Toast.makeText(this, "Please select or enter recipient token", Toast.LENGTH_SHORT).show()
             return
@@ -111,8 +108,9 @@ class MainActivity : ComponentActivity() {
         FcmSender.sendSecurePage(
             targetToken = targetToken,
             senderName = state.senderNameInput,
-            messageText = state.messageTextInput,
+            messageText = if (pageLevel == PageLevel.HEY_LOOK) "Hey look! Check your phone when free." else state.messageTextInput,
             familyPassphrase = state.familyPassphrase,
+            pageLevel = pageLevel,
             serverKey = state.serverKeyInput
         ) { success, resultMsg ->
             runOnUiThread {
@@ -134,11 +132,7 @@ fun MainPagerApp(
     onGrantDnd: () -> Unit,
     onTestAlarm: () -> Unit,
     onCopyText: (String, String) -> Unit,
-    onUpdateTargetToken: (String) -> Unit,
-    onUpdateSenderName: (String) -> Unit,
-    onUpdateMessageText: (String) -> Unit,
-    onUpdateServerKey: (String) -> Unit,
-    onSendPage: (String?) -> Unit
+    onSendPage: (String, PageLevel) -> Unit
 ) {
     var selectedTab by remember { mutableStateOf(0) }
 
@@ -175,11 +169,10 @@ fun MainPagerApp(
                     uiState = uiState,
                     onImportPairingCode = onImportPairingCode,
                     onDeleteContact = onDeleteContact,
-                    onPageContact = { contact ->
+                    onPageContact = { contact, level ->
                         onSelectContact(contact)
-                        onSendPage(contact.fcmToken)
-                    },
-                    onCopyText = onCopyText
+                        onSendPage(contact.fcmToken, level)
+                    }
                 )
             } else {
                 RecipientSetupScreen(
@@ -200,8 +193,7 @@ fun FamilyContactsScreen(
     uiState: MainUiState,
     onImportPairingCode: (String) -> Boolean,
     onDeleteContact: (String) -> Unit,
-    onPageContact: (PairedContact) -> Unit,
-    onCopyText: (String, String) -> Unit
+    onPageContact: (PairedContact, PageLevel) -> Unit
 ) {
     var pairingCodeInput by remember { mutableStateOf("") }
 
@@ -212,7 +204,7 @@ fun FamilyContactsScreen(
             .verticalScroll(rememberScrollState())
     ) {
         Text("Family Contacts Address Book", fontSize = 22.sp, fontWeight = FontWeight.Bold)
-        Text("1-Tap to page family members. Bidirectional pairing syncs contacts instantly.", fontSize = 14.sp, color = Color.Gray)
+        Text("Select a page level: (1) Hey look! or (2) SOS Emergency", fontSize = 14.sp, color = Color.Gray)
 
         Spacer(modifier = Modifier.height(16.dp))
 
@@ -259,31 +251,47 @@ fun FamilyContactsScreen(
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(vertical = 4.dp),
+                        .padding(vertical = 6.dp),
                     colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF3E0))
                 ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(contact.name, fontWeight = FontWeight.Bold, fontSize = 18.sp, color = Color(0xFFE65100))
-                            Text("Token: ${contact.fcmToken.take(16)}...", fontSize = 12.sp, color = Color.Gray)
-                        }
-                        Row {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(contact.name, fontWeight = FontWeight.Bold, fontSize = 20.sp, color = Color(0xFFE65100))
                             IconButton(onClick = { onDeleteContact(contact.id) }) {
                                 Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color.Gray)
                             }
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            // Level 1: Hey look!
                             Button(
-                                onClick = { onPageContact(contact) },
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD32F2F))
+                                onClick = { onPageContact(contact, PageLevel.HEY_LOOK) },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(PageLevel.HEY_LOOK.colorHex)),
+                                modifier = Modifier.weight(1f)
                             ) {
-                                Icon(Icons.Default.NotificationsActive, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Icon(Icons.Default.Visibility, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text("PAGE")
+                                Text("Hey Look!", fontSize = 13.sp)
+                            }
+
+                            // Level 2: SOS
+                            Button(
+                                onClick = { onPageContact(contact, PageLevel.SOS) },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(PageLevel.SOS.colorHex)),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(Icons.Default.NotificationsActive, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("SOS", fontSize = 13.sp, fontWeight = FontWeight.Bold)
                             }
                         }
                     }
@@ -362,7 +370,6 @@ fun RecipientSetupScreen(
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        // My Name
         OutlinedTextField(
             value = nameInput,
             onValueChange = {
@@ -375,7 +382,6 @@ fun RecipientSetupScreen(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // Security Key Configuration
         Text("Family Security Key 🔒", fontWeight = FontWeight.Bold, fontSize = 16.sp)
         OutlinedTextField(
             value = keyInput,
@@ -395,7 +401,6 @@ fun RecipientSetupScreen(
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        // Share Pairing Code Card
         Text("Share Your Pairing Code 📲", fontWeight = FontWeight.Bold, fontSize = 16.sp)
         Text("Send this code to your family member so they can add your phone bidirectionally.", fontSize = 12.sp, color = Color.Gray)
         Spacer(modifier = Modifier.height(8.dp))
@@ -422,7 +427,6 @@ fun RecipientSetupScreen(
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        // Sound Test
         Text("Sound Test", fontWeight = FontWeight.Bold, fontSize = 16.sp)
         Spacer(modifier = Modifier.height(8.dp))
         OutlinedButton(

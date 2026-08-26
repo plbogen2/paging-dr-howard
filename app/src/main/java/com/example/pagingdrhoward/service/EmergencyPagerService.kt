@@ -8,7 +8,7 @@ import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import com.example.pagingdrhoward.EmergencyAlertActivity
-import com.example.pagingdrhoward.R
+import com.example.pagingdrhoward.data.PageLevel
 import com.example.pagingdrhoward.util.AudioPlayer
 import com.example.pagingdrhoward.util.DndHelper
 
@@ -28,12 +28,12 @@ class EmergencyPagerService : Service() {
 
         val sender = intent?.getStringExtra("EXTRA_SENDER") ?: "Family Member"
         val message = intent?.getStringExtra("EXTRA_MESSAGE") ?: "URGENT: Please respond!"
+        val levelCode = intent?.getStringExtra("EXTRA_LEVEL")
+        val pageLevel = PageLevel.fromCode(levelCode)
 
-        // 1. Ensure notification channel exists
         DndHelper.createEmergencyNotificationChannel(this)
 
-        // 2. FullScreenIntent to wake lockscreen
-        val fullScreenIntent = EmergencyAlertActivity.createIntent(this, sender, message)
+        val fullScreenIntent = EmergencyAlertActivity.createIntent(this, sender, message, pageLevel)
         val fullScreenPendingIntent = PendingIntent.getActivity(
             this,
             0,
@@ -41,10 +41,9 @@ class EmergencyPagerService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        // 3. Build high-priority foreground notification
         val notification = NotificationCompat.Builder(this, DndHelper.CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
-            .setContentTitle("EMERGENCY PAGE from $sender")
+            .setContentTitle("${pageLevel.title} from $sender")
             .setContentText(message)
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setCategory(NotificationCompat.CATEGORY_ALARM)
@@ -53,7 +52,6 @@ class EmergencyPagerService : Service() {
             .setAutoCancel(false)
             .build()
 
-        // 4. Start foreground service with MEDIA_PLAYBACK type on API 34+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val foregroundServiceType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
@@ -65,10 +63,7 @@ class EmergencyPagerService : Service() {
             startForeground(NOTIFICATION_ID, notification)
         }
 
-        // 5. Start audio loop on USAGE_ALARM stream
-        AudioPlayer.startEmergencyAlarm(this)
-
-        // 6. Launch full screen activity
+        AudioPlayer.startEmergencyAlarm(this, pageLevel)
         startActivity(fullScreenIntent)
 
         return START_STICKY

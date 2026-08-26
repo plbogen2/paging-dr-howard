@@ -10,11 +10,12 @@ object FcmPayloadBuilder {
         val senderName: String,
         val messageText: String,
         val familyPassphrase: String,
+        val level: PageLevel = PageLevel.SOS,
         val timestamp: String = System.currentTimeMillis().toString()
     )
 
     /**
-     * Builds FCM JSON payload string with HMAC signature and AES encryption.
+     * Builds FCM JSON payload string with PageLevel, HMAC signature, and AES encryption.
      */
     fun buildJsonPayload(payload: PagePayload): String {
         require(payload.targetToken.isNotBlank()) { "Target device token cannot be blank" }
@@ -25,7 +26,7 @@ object FcmPayloadBuilder {
             payload.messageText
         }
 
-        val rawPayloadStr = "${payload.senderName}|${payload.messageText}|${payload.timestamp}"
+        val rawPayloadStr = "${payload.senderName}|${payload.messageText}|${payload.level.code}|${payload.timestamp}"
         val signature = if (payload.familyPassphrase.isNotBlank()) {
             SecurityUtils.generateSignature(payload.familyPassphrase, rawPayloadStr)
         } else {
@@ -38,6 +39,7 @@ object FcmPayloadBuilder {
             put("data", JSONObject().apply {
                 put("sender", payload.senderName)
                 put("message", encryptedMessage)
+                put("level", payload.level.code)
                 put("timestamp", payload.timestamp)
                 put("signature", signature)
                 put("encrypted", payload.familyPassphrase.isNotBlank())
