@@ -13,11 +13,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.ContentCopy
-import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.NotificationsActive
-import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -28,6 +24,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.pagingdrhoward.data.DefaultPagerRepository
+import com.example.pagingdrhoward.data.PairedContact
 import com.example.pagingdrhoward.network.FcmSender
 import com.example.pagingdrhoward.service.EmergencyPagerService
 import com.example.pagingdrhoward.util.DndHelper
@@ -42,15 +39,12 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Initialize Architecture Layer (Repository + ViewModel)
         val prefs = getSharedPreferences(DefaultPagerRepository.PREF_NAME, MODE_PRIVATE)
         val repository = DefaultPagerRepository(prefs)
         viewModel = MainViewModel(repository)
 
-        // Register DND-bypassing notification channel
         DndHelper.createEmergencyNotificationChannel(this)
 
-        // Fetch FCM token if not present
         if (repository.getFcmToken() == null) {
             FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
                 if (task.isSuccessful && task.result != null) {
@@ -64,14 +58,18 @@ class MainActivity : ComponentActivity() {
                 MainPagerApp(
                     uiState = viewModel.uiState,
                     onSavePassphrase = { passphrase -> viewModel.saveFamilyPassphrase(passphrase) },
+                    onUpdateMyName = { name -> viewModel.updateMyName(name) },
+                    onImportPairingCode = { code -> viewModel.importPairingCode(code) },
+                    onDeleteContact = { id -> viewModel.deleteContact(id) },
+                    onSelectContact = { contact -> viewModel.selectContactForPage(contact) },
                     onGrantDnd = { DndHelper.openDndSettings(this) },
                     onTestAlarm = { triggerLocalTestPage() },
-                    onCopyToken = { copyToClipboard(viewModel.uiState.fcmToken) },
+                    onCopyText = { label, text -> copyToClipboard(label, text) },
                     onUpdateTargetToken = { viewModel.updateTargetToken(it) },
                     onUpdateSenderName = { viewModel.updateSenderName(it) },
                     onUpdateMessageText = { viewModel.updateMessageText(it) },
                     onUpdateServerKey = { viewModel.updateServerKey(it) },
-                    onSendPage = { sendRemotePage() }
+                    onSendPage = { targetToken -> sendRemotePage(targetToken) }
                 )
             }
         }
@@ -95,23 +93,23 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun copyToClipboard(text: String) {
+    private fun copyToClipboard(label: String, text: String) {
         val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        val clip = ClipData.newPlainText("FCM Device Token", text)
+        val clip = ClipData.newPlainText(label, text)
         clipboard.setPrimaryClip(clip)
-        Toast.makeText(this, "Device token copied to clipboard!", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, "$label copied to clipboard!", Toast.LENGTH_SHORT).show()
     }
 
-    private fun sendRemotePage() {
-        val (isValid, errorMsg) = viewModel.validatePageSubmission()
-        if (!isValid) {
-            Toast.makeText(this, errorMsg ?: "Invalid input", Toast.LENGTH_SHORT).show()
+    private fun sendRemotePage(overrideTargetToken: String? = null) {
+        val targetToken = overrideTargetToken ?: viewModel.uiState.targetTokenInput
+        if (targetToken.isBlank()) {
+            Toast.makeText(this, "Please select or enter recipient token", Toast.LENGTH_SHORT).show()
             return
         }
 
         val state = viewModel.uiState
         FcmSender.sendSecurePage(
-            targetToken = state.targetTokenInput,
+            targetToken = targetToken,
             senderName = state.senderNameInput,
             messageText = state.messageTextInput,
             familyPassphrase = state.familyPassphrase,
@@ -129,21 +127,25 @@ class MainActivity : ComponentActivity() {
 fun MainPagerApp(
     uiState: MainUiState,
     onSavePassphrase: (String) -> Unit,
+    onUpdateMyName: (String) -> Unit,
+    onImportPairingCode: (String) -> Boolean,
+    onDeleteContact: (String) -> Unit,
+    onSelectContact: (PairedContact) -> Unit,
     onGrantDnd: () -> Unit,
     onTestAlarm: () -> Unit,
-    onCopyToken: () -> Unit,
+    onCopyText: (String, String) -> Unit,
     onUpdateTargetToken: (String) -> Unit,
     onUpdateSenderName: (String) -> Unit,
     onUpdateMessageText: (String) -> Unit,
     onUpdateServerKey: (String) -> Unit,
-    onSendPage: () -> Unit
+    onSendPage: (String?) -> Unit
 ) {
     var selectedTab by remember { mutableStateOf(0) }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Paging Dr. Howard 🔐", fontWeight = FontWeight.Bold) },
+                title = { Text("Paging Dr. Howard 📟", fontWeight = FontWeight.Bold) },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = Color(0xFFD32F2F),
                     titleContentColor = Color.White
@@ -155,36 +157,137 @@ fun MainPagerApp(
                 NavigationBarItem(
                     selected = selectedTab == 0,
                     onClick = { selectedTab = 0 },
-                    icon = { Icon(Icons.Default.NotificationsActive, contentDescription = "Receive") },
-                    label = { Text("My Device Setup") }
+                    icon = { Icon(Icons.Default.People, contentDescription = "Family Contacts") },
+                    label = { Text("Family Contacts") }
                 )
                 NavigationBarItem(
                     selected = selectedTab == 1,
                     onClick = { selectedTab = 1 },
-                    icon = { Icon(Icons.Default.Warning, contentDescription = "Send") },
-                    label = { Text("Send Page") }
+                    icon = { Icon(Icons.Default.Settings, contentDescription = "Setup") },
+                    label = { Text("My Device Setup") }
                 )
             }
         }
     ) { paddingValues ->
         Box(modifier = Modifier.padding(paddingValues)) {
             if (selectedTab == 0) {
+                FamilyContactsScreen(
+                    uiState = uiState,
+                    onImportPairingCode = onImportPairingCode,
+                    onDeleteContact = onDeleteContact,
+                    onPageContact = { contact ->
+                        onSelectContact(contact)
+                        onSendPage(contact.fcmToken)
+                    },
+                    onCopyText = onCopyText
+                )
+            } else {
                 RecipientSetupScreen(
                     uiState = uiState,
                     onSavePassphrase = onSavePassphrase,
+                    onUpdateMyName = onUpdateMyName,
                     onGrantDnd = onGrantDnd,
                     onTestAlarm = onTestAlarm,
-                    onCopyToken = onCopyToken
+                    onCopyText = onCopyText
                 )
-            } else {
-                SendPageScreen(
-                    uiState = uiState,
-                    onUpdateTargetToken = onUpdateTargetToken,
-                    onUpdateSenderName = onUpdateSenderName,
-                    onUpdateMessageText = onUpdateMessageText,
-                    onUpdateServerKey = onUpdateServerKey,
-                    onSendPage = onSendPage
+            }
+        }
+    }
+}
+
+@Composable
+fun FamilyContactsScreen(
+    uiState: MainUiState,
+    onImportPairingCode: (String) -> Boolean,
+    onDeleteContact: (String) -> Unit,
+    onPageContact: (PairedContact) -> Unit,
+    onCopyText: (String, String) -> Unit
+) {
+    var pairingCodeInput by remember { mutableStateOf("") }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp)
+            .verticalScroll(rememberScrollState())
+    ) {
+        Text("Family Contacts Address Book", fontSize = 22.sp, fontWeight = FontWeight.Bold)
+        Text("1-Tap to page family members. Bidirectional pairing syncs contacts instantly.", fontSize = 14.sp, color = Color.Gray)
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Pair New Family Member Card
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFFF5F5F5))
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text("➕ Pair New Family Phone", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                Text("Paste your family member's Pairing Code to add them bidirectionally.", fontSize = 12.sp, color = Color.Gray)
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = pairingCodeInput,
+                    onValueChange = { pairingCodeInput = it },
+                    label = { Text("Paste Family Pairing Code") },
+                    modifier = Modifier.fillMaxWidth()
                 )
+                Spacer(modifier = Modifier.height(8.dp))
+                Button(
+                    onClick = {
+                        if (onImportPairingCode(pairingCodeInput)) {
+                            pairingCodeInput = ""
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.PersonAdd, contentDescription = null)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Add & Pair Phone")
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        Text("Paired Family Members (${uiState.pairedContacts.size})", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+        Spacer(modifier = Modifier.height(8.dp))
+
+        if (uiState.pairedContacts.isEmpty()) {
+            Text("No family contacts added yet. Add a phone above or share your pairing code in setup!", color = Color.Gray, fontSize = 14.sp)
+        } else {
+            uiState.pairedContacts.forEach { contact ->
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF3E0))
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(contact.name, fontWeight = FontWeight.Bold, fontSize = 18.sp, color = Color(0xFFE65100))
+                            Text("Token: ${contact.fcmToken.take(16)}...", fontSize = 12.sp, color = Color.Gray)
+                        }
+                        Row {
+                            IconButton(onClick = { onDeleteContact(contact.id) }) {
+                                Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color.Gray)
+                            }
+                            Button(
+                                onClick = { onPageContact(contact) },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD32F2F))
+                            ) {
+                                Icon(Icons.Default.NotificationsActive, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("PAGE")
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -194,10 +297,12 @@ fun MainPagerApp(
 fun RecipientSetupScreen(
     uiState: MainUiState,
     onSavePassphrase: (String) -> Unit,
+    onUpdateMyName: (String) -> Unit,
     onGrantDnd: () -> Unit,
     onTestAlarm: () -> Unit,
-    onCopyToken: () -> Unit
+    onCopyText: (String, String) -> Unit
 ) {
+    var nameInput by remember(uiState.myName) { mutableStateOf(uiState.myName) }
     var keyInput by remember(uiState.familyPassphrase) { mutableStateOf(uiState.familyPassphrase) }
 
     Column(
@@ -206,13 +311,10 @@ fun RecipientSetupScreen(
             .padding(16.dp)
             .verticalScroll(rememberScrollState())
     ) {
-        Text("Device Pager Setup", fontSize = 22.sp, fontWeight = FontWeight.Bold)
-        Text(
-            "Ensure Do Not Disturb access is enabled and configure your Family Security Key.",
-            fontSize = 14.sp,
-            color = Color.Gray,
-            modifier = Modifier.padding(top = 4.dp, bottom = 16.dp)
-        )
+        Text("Device & Pairing Setup", fontSize = 22.sp, fontWeight = FontWeight.Bold)
+        Text("Configure your name, DND access, and share your pairing code with family.", fontSize = 14.sp, color = Color.Gray)
+
+        Spacer(modifier = Modifier.height(16.dp))
 
         // DND Access Status Card
         Card(
@@ -260,11 +362,21 @@ fun RecipientSetupScreen(
 
         Spacer(modifier = Modifier.height(24.dp))
 
+        // My Name
+        OutlinedTextField(
+            value = nameInput,
+            onValueChange = {
+                nameInput = it
+                onUpdateMyName(it)
+            },
+            label = { Text("Your Display Name (e.g. Dad or Daughter)") },
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
         // Security Key Configuration
         Text("Family Security Key 🔒", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-        Text("Both phones must share the same secret key to authenticate incoming emergency pages.", fontSize = 12.sp, color = Color.Gray)
-        Spacer(modifier = Modifier.height(8.dp))
-
         OutlinedTextField(
             value = keyInput,
             onValueChange = { keyInput = it },
@@ -283,27 +395,27 @@ fun RecipientSetupScreen(
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        // Device Token Card
-        Text("Your Device Token", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-        Text("Share this token with family members so they can page this phone.", fontSize = 12.sp, color = Color.Gray)
+        // Share Pairing Code Card
+        Text("Share Your Pairing Code 📲", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+        Text("Send this code to your family member so they can add your phone bidirectionally.", fontSize = 12.sp, color = Color.Gray)
         Spacer(modifier = Modifier.height(8.dp))
 
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Text(
-                    text = uiState.fcmToken,
-                    fontSize = 12.sp,
+                    text = uiState.myPairingCode.ifEmpty { "Generating pairing code..." },
+                    fontSize = 11.sp,
                     fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                    maxLines = 4
+                    maxLines = 3
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 OutlinedButton(
-                    onClick = onCopyToken,
+                    onClick = { onCopyText("Pairing Code", uiState.myPairingCode) },
                     modifier = Modifier.align(Alignment.End)
                 ) {
                     Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Copy Token")
+                    Text("Copy Pairing Code")
                 }
             }
         }
@@ -320,75 +432,6 @@ fun RecipientSetupScreen(
             Icon(Icons.Default.NotificationsActive, contentDescription = null)
             Spacer(modifier = Modifier.width(8.dp))
             Text("Test Emergency Alarm Sound")
-        }
-    }
-}
-
-@Composable
-fun SendPageScreen(
-    uiState: MainUiState,
-    onUpdateTargetToken: (String) -> Unit,
-    onUpdateSenderName: (String) -> Unit,
-    onUpdateMessageText: (String) -> Unit,
-    onUpdateServerKey: (String) -> Unit,
-    onSendPage: () -> Unit
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp)
-            .verticalScroll(rememberScrollState())
-    ) {
-        Text("Send Secure Page", fontSize = 22.sp, fontWeight = FontWeight.Bold)
-        Text("Cryptographically signs & encrypts page payloads using your Family Security Key.", fontSize = 14.sp, color = Color.Gray)
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        OutlinedTextField(
-            value = uiState.targetTokenInput,
-            onValueChange = onUpdateTargetToken,
-            label = { Text("Recipient FCM Token") },
-            modifier = Modifier.fillMaxWidth(),
-            maxLines = 3
-        )
-
-        Spacer(modifier = Modifier.height(12.dp))
-
-        OutlinedTextField(
-            value = uiState.senderNameInput,
-            onValueChange = onUpdateSenderName,
-            label = { Text("Your Name (Sender)") },
-            modifier = Modifier.fillMaxWidth()
-        )
-
-        Spacer(modifier = Modifier.height(12.dp))
-
-        OutlinedTextField(
-            value = uiState.messageTextInput,
-            onValueChange = onUpdateMessageText,
-            label = { Text("Alert Message") },
-            modifier = Modifier.fillMaxWidth()
-        )
-
-        Spacer(modifier = Modifier.height(12.dp))
-
-        OutlinedTextField(
-            value = uiState.serverKeyInput,
-            onValueChange = onUpdateServerKey,
-            label = { Text("Firebase Server Key (Optional)") },
-            modifier = Modifier.fillMaxWidth()
-        )
-
-        Spacer(modifier = Modifier.height(24.dp))
-
-        Button(
-            onClick = onSendPage,
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(56.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD32F2F))
-        ) {
-            Text("SEND SECURE EMERGENCY PAGE", fontSize = 16.sp, fontWeight = FontWeight.Bold)
         }
     }
 }
