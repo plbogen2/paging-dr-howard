@@ -1,8 +1,8 @@
 package com.example.pagingdrhoward.util
 
-import android.util.Base64
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
+import java.util.Base64
 import javax.crypto.Cipher
 import javax.crypto.Mac
 import javax.crypto.spec.IvParameterSpec
@@ -28,7 +28,7 @@ object SecurityUtils {
             val mac = Mac.getInstance("HmacSHA256")
             mac.init(keySpec)
             val hmacBytes = mac.doFinal(data.toByteArray(StandardCharsets.UTF_8))
-            return Base64.encodeToString(hmacBytes, Base64.NO_WRAP)
+            return Base64.getEncoder().encodeToString(hmacBytes)
         } catch (e: Exception) {
             return ""
         }
@@ -50,11 +50,11 @@ object SecurityUtils {
         return try {
             val keySpec = deriveKey(passphrase)
             val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
-            val iv = ByteArray(16) // 16-byte zero IV for deterministic family payload or random IV
+            val iv = ByteArray(16)
             val ivSpec = IvParameterSpec(iv)
             cipher.init(Cipher.ENCRYPT_MODE, keySpec, ivSpec)
             val encryptedBytes = cipher.doFinal(plainText.toByteArray(StandardCharsets.UTF_8))
-            Base64.encodeToString(encryptedBytes, Base64.NO_WRAP)
+            Base64.getEncoder().encodeToString(encryptedBytes)
         } catch (e: Exception) {
             plainText
         }
@@ -70,7 +70,7 @@ object SecurityUtils {
             val iv = ByteArray(16)
             val ivSpec = IvParameterSpec(iv)
             cipher.init(Cipher.DECRYPT_MODE, keySpec, ivSpec)
-            val decodedBytes = Base64.decode(cipherText, Base64.NO_WRAP)
+            val decodedBytes = Base64.getDecoder().decode(cipherText)
             String(cipher.doFinal(decodedBytes), StandardCharsets.UTF_8)
         } catch (e: Exception) {
             cipherText

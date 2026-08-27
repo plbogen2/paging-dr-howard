@@ -1,6 +1,5 @@
 package com.example.pagingdrhoward.util
 
-import android.util.Base64
 import java.nio.charset.StandardCharsets
 import java.security.KeyFactory
 import java.security.KeyPair
@@ -11,6 +10,7 @@ import java.security.PublicKey
 import java.security.Signature
 import java.security.spec.ECGenParameterSpec
 import java.security.spec.X509EncodedKeySpec
+import java.util.Base64
 import javax.crypto.Cipher
 import javax.crypto.KeyAgreement
 import javax.crypto.SecretKey
@@ -36,14 +36,14 @@ object CryptoManager {
      * Converts a PublicKey to Base64 X.509 encoded string.
      */
     fun publicKeyToBase64(publicKey: PublicKey): String {
-        return Base64.encodeToString(publicKey.encoded, Base64.NO_WRAP)
+        return Base64.getEncoder().encodeToString(publicKey.encoded)
     }
 
     /**
      * Restores a PublicKey object from Base64 string.
      */
     fun publicKeyFromBase64(base64Str: String): PublicKey {
-        val keyBytes = Base64.decode(base64Str, Base64.NO_WRAP)
+        val keyBytes = Base64.getDecoder().decode(base64Str)
         val keySpec = X509EncodedKeySpec(keyBytes)
         val keyFactory = KeyFactory.getInstance(EC_ALGORITHM)
         return keyFactory.generatePublic(keySpec)
@@ -57,7 +57,7 @@ object CryptoManager {
         signature.initSign(privateKey)
         signature.update(data.toByteArray(StandardCharsets.UTF_8))
         val sigBytes = signature.sign()
-        return Base64.encodeToString(sigBytes, Base64.NO_WRAP)
+        return Base64.getEncoder().encodeToString(sigBytes)
     }
 
     /**
@@ -65,7 +65,7 @@ object CryptoManager {
      */
     fun verify(publicKey: PublicKey, data: String, signatureBase64: String): Boolean {
         return try {
-            val sigBytes = Base64.decode(signatureBase64, Base64.NO_WRAP)
+            val sigBytes = Base64.getDecoder().decode(signatureBase64)
             val signature = Signature.getInstance(SIGNATURE_ALGORITHM)
             signature.initVerify(publicKey)
             signature.update(data.toByteArray(StandardCharsets.UTF_8))
@@ -84,7 +84,6 @@ object CryptoManager {
         ka.doPhase(peerPublicKey, true)
         val rawSharedSecret = ka.generateSecret()
         
-        // Hash shared secret with SHA-256 to form 256-bit AES key
         val digest = MessageDigest.getInstance("SHA-256")
         val aesKeyBytes = digest.digest(rawSharedSecret)
         return SecretKeySpec(aesKeyBytes, "AES")
@@ -99,7 +98,7 @@ object CryptoManager {
         val ivSpec = IvParameterSpec(iv)
         cipher.init(Cipher.ENCRYPT_MODE, sharedKey, ivSpec)
         val encryptedBytes = cipher.doFinal(plainText.toByteArray(StandardCharsets.UTF_8))
-        return Base64.encodeToString(encryptedBytes, Base64.NO_WRAP)
+        return Base64.getEncoder().encodeToString(encryptedBytes)
     }
 
     /**
@@ -110,7 +109,7 @@ object CryptoManager {
         val iv = ByteArray(16)
         val ivSpec = IvParameterSpec(iv)
         cipher.init(Cipher.DECRYPT_MODE, sharedKey, ivSpec)
-        val decodedBytes = Base64.decode(cipherTextBase64, Base64.NO_WRAP)
+        val decodedBytes = Base64.getDecoder().decode(cipherTextBase64)
         return String(cipher.doFinal(decodedBytes), StandardCharsets.UTF_8)
     }
 }
