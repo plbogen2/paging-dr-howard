@@ -68,5 +68,4 @@ jobs:
           - Bidirectional Family Phone Pairing & Address Book
           - DND & Silent Mode Override via USAGE_ALARM
           - ECDH & ECDSA Public/Private Key Cryptography per pairing
-          - 4-Digit Versioning System (${BUILD_TAG})" \
-          --clobber
+          - 4-Digit Versioning System (${BUILD_TAG})"
