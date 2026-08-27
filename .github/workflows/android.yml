@@ -55,12 +55,12 @@ jobs:
 
     - name: Create GitHub Release on Green
       if: github.ref == 'refs/heads/master' && github.event_name == 'push'
-      uses: softprops/action-gh-release@v2
-      with:
-        tag_name: ${{ env.BUILD_TAG }}
-        name: "Paging Dr. Howard ${{ env.BUILD_TAG }} Release 📟"
-        body: |
-          ### Paging Dr. Howard ${{ env.BUILD_TAG }} 📟🔐
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        gh release create "${BUILD_TAG}" app/build/outputs/apk/debug/app-debug.apk \
+          --title "Paging Dr. Howard ${BUILD_TAG} Release 📟" \
+          --notes "### Paging Dr. Howard ${BUILD_TAG} 📟🔐
           Automated Release compiled on green CI test pass.
           
           **Features**:
@@ -68,7 +68,5 @@ jobs:
           - Bidirectional Family Phone Pairing & Address Book
           - DND & Silent Mode Override via USAGE_ALARM
           - ECDH & ECDSA Public/Private Key Cryptography per pairing
-          - 4-Digit Versioning System (`${{ env.BUILD_TAG }}`)
-        files: app/build/outputs/apk/debug/app-debug.apk
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          - 4-Digit Versioning System (${BUILD_TAG})" \
+          --clobber
