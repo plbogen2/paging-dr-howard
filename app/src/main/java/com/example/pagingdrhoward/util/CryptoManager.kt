@@ -2,12 +2,17 @@ package com.example.pagingdrhoward.util
 
 import android.util.Base64
 import java.nio.charset.StandardCharsets
-import java.security.*
+import java.security.KeyFactory
+import java.security.KeyPair
+import java.security.KeyPairGenerator
+import java.security.MessageDigest
+import java.security.PrivateKey
+import java.security.PublicKey
+import java.security.Signature
 import java.security.spec.ECGenParameterSpec
 import java.security.spec.X509EncodedKeySpec
 import javax.crypto.Cipher
 import javax.crypto.KeyAgreement
-import javax.crypto.MessageDigest
 import javax.crypto.SecretKey
 import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.SecretKeySpec
