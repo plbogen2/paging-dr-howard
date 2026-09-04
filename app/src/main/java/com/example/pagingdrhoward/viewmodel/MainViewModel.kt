@@ -61,6 +61,13 @@ class MainViewModel(private val repository: PagerRepository) : ViewModel() {
         )
     }
 
+    fun setTokenError(error: String) {
+        uiState = uiState.copy(
+            fcmToken = error,
+            errorMessage = error
+        )
+    }
+
     fun updateMyName(name: String) {
         val pairingCode = PairingPayload.generatePairingCode(name, uiState.fcmToken, uiState.familyPassphrase)
         uiState = uiState.copy(

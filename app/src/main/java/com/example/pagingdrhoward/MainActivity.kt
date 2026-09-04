@@ -44,14 +44,33 @@ class MainActivity : ComponentActivity() {
         val repository = DefaultPagerRepository(prefs)
         viewModel = MainViewModel(repository)
 
-        DndHelper.createEmergencyNotificationChannel(this)
+        try {
+            DndHelper.createEmergencyNotificationChannel(this)
+        } catch (e: Throwable) {
+            // Ignore channel creation errors on customized OS
+        }
 
-        if (repository.getFcmToken() == null) {
-            FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
-                if (task.isSuccessful && task.result != null) {
-                    viewModel.updateFcmToken(task.result)
-                }
+        try {
+            if (repository.getFcmToken() == null) {
+                FirebaseMessaging.getInstance().token
+                    .addOnCompleteListener { task ->
+                        try {
+                            if (task.isSuccessful && task.result != null) {
+                                viewModel.updateFcmToken(task.result)
+                            } else {
+                                val err = task.exception?.localizedMessage ?: "FCM unavailable (requires Google Play Services)"
+                                viewModel.setTokenError(err)
+                            }
+                        } catch (e: Throwable) {
+                            viewModel.setTokenError("Google Play Services / FCM not available on this device.")
+                        }
+                    }
+                    .addOnFailureListener { e ->
+                        viewModel.setTokenError("FCM Error: ${e.localizedMessage ?: "Google Play Services not installed"}")
+                    }
             }
+        } catch (e: Throwable) {
+            viewModel.setTokenError("Push notifications require Google Play Services (not present on standard Fire OS).")
         }
 
         setContent {
@@ -74,7 +93,11 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        viewModel.setDndGranted(DndHelper.hasDndAccess(this))
+        try {
+            viewModel.setDndGranted(DndHelper.hasDndAccess(this))
+        } catch (e: Throwable) {
+            viewModel.setDndGranted(false)
+        }
     }
 
     private fun triggerLocalTestPage() {

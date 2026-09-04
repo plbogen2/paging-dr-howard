@@ -112,4 +112,12 @@ class MainViewModelTest {
         assertFalse(isValidBlankSender)
         assertEquals("Sender name is required", errorSender)
     }
+
+    @Test
+    fun `test setTokenError updates state and displays error`() {
+        viewModel.setTokenError("Google Play Services not installed")
+
+        assertEquals("Google Play Services not installed", viewModel.uiState.fcmToken)
+        assertEquals("Google Play Services not installed", viewModel.uiState.errorMessage)
+    }
 }
