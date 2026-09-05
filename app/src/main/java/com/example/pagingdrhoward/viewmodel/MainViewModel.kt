@@ -25,6 +25,7 @@ data class MainUiState(
     val targetTopicInput: String = "",
     val messageTextInput: String = "URGENT: Please respond ASAP!",
     val updateInfo: AppUpdateManager.UpdateInfo? = null,
+    val appVersion: String = "1.0.0",
     val errorMessage: String? = null,
     val successMessage: String? = null
 )
@@ -59,6 +60,10 @@ class MainViewModel(private val repository: PagerRepository) : ViewModel() {
 
     fun setDndGranted(granted: Boolean) {
         uiState = uiState.copy(isDndAccessGranted = granted)
+    }
+
+    fun setAppVersion(version: String) {
+        uiState = uiState.copy(appVersion = version)
     }
 
     fun setUpdateInfo(updateInfo: AppUpdateManager.UpdateInfo?) {

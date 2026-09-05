@@ -91,17 +91,21 @@ class MainActivity : ComponentActivity() {
         startPushListenerService()
 
         // Check for app updates from GitHub releases
-        val currentBuildNumber = try {
+        val (currentBuildNumber, currentVersionName) = try {
             val pInfo = packageManager.getPackageInfo(packageName, 0)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            val code = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                 pInfo.longVersionCode.toInt()
             } else {
                 @Suppress("DEPRECATION")
                 pInfo.versionCode
             }
+            val name = pInfo.versionName ?: "1.0.0.$code"
+            Pair(code, name)
         } catch (e: Exception) {
-            1001
+            Pair(1001, "1.0.0.1001")
         }
+
+        viewModel.setAppVersion(currentVersionName)
 
         AppUpdateManager.checkForUpdate(currentBuildNumber) { updateInfo ->
             if (updateInfo != null && updateInfo.hasUpdate) {
@@ -698,5 +702,55 @@ fun RecipientSetupScreen(
             Spacer(modifier = Modifier.width(8.dp))
             Text("Test Emergency Alarm Sound")
         }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        Text("About & Version", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+        Spacer(modifier = Modifier.height(8.dp))
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFFECEFF1))
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("App Version", fontWeight = FontWeight.Medium, fontSize = 14.sp)
+                    Surface(
+                        color = Color(0xFF37474F),
+                        shape = RoundedCornerShape(6.dp)
+                    ) {
+                        Text(
+                            text = uiState.appVersion,
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                Divider(color = Color.LightGray)
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("Device Topic ID", fontSize = 12.sp, color = Color.Gray)
+                    Text(uiState.myTopicId.take(16) + "...", fontSize = 12.sp, color = Color.DarkGray)
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("Protocol", fontSize = 12.sp, color = Color.Gray)
+                    Text("ntfy.sh + ECDSA P-256", fontSize = 12.sp, color = Color.DarkGray)
+                }
+            }
+        }
+        Spacer(modifier = Modifier.height(16.dp))
     }
 }
