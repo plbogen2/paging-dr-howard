@@ -201,7 +201,7 @@ class PushListenerService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        return NotificationCompat.Builder(this, DndHelper.CHANNEL_ID)
+        return NotificationCompat.Builder(this, DndHelper.CHANNEL_STATUS_ID)
             .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
             .setContentTitle("Paging Dr. Howard 📟")
             .setContentText("Ready & Listening for Family Emergency Pages")

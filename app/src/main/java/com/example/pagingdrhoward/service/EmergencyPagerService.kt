@@ -41,7 +41,7 @@ class EmergencyPagerService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val notification = NotificationCompat.Builder(this, DndHelper.CHANNEL_ID)
+        val notification = NotificationCompat.Builder(this, DndHelper.CHANNEL_EMERGENCY_ID)
             .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
             .setContentTitle("${pageLevel.title} from $sender")
             .setContentText(message)
