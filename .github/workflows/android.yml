@@ -77,20 +77,20 @@ jobs:
           CHANGELOG="- Bug fixes and performance improvements"
         fi
 
-        cat <<EOF > release_notes.md
-### Paging Dr. Howard ${BUILD_TAG} 📟🔐
-
-#### 🌟 What's New in this Version:
-${CHANGELOG}
-
----
-**Core Features**:
-- Multi-Level Paging: (1) Hey look! and (2) SOS Emergency
-- Bidirectional Family Phone Pairing & Address Book
-- DND & Silent Mode Override via USAGE_ALARM
-- ECDH & ECDSA Public/Private Key Cryptography per pairing
-- 4-Digit Versioning System (${BUILD_TAG})
-EOF
+        {
+          echo "### Paging Dr. Howard ${BUILD_TAG} 📟🔐"
+          echo ""
+          echo "#### 🌟 What's New in this Version:"
+          echo "${CHANGELOG}"
+          echo ""
+          echo "---"
+          echo "**Core Features**:"
+          echo "- Multi-Level Paging: (1) Hey look! and (2) SOS Emergency"
+          echo "- Bidirectional Family Phone Pairing & Address Book"
+          echo "- DND & Silent Mode Override via USAGE_ALARM"
+          echo "- ECDH & ECDSA Public/Private Key Cryptography per pairing"
+          echo "- 4-Digit Versioning System (${BUILD_TAG})"
+        } > release_notes.md
 
         gh release create "${BUILD_TAG}" app/build/outputs/apk/debug/PagingDrHoward.apk \
           --title "Paging Dr. Howard ${BUILD_TAG} Release 📟" \
