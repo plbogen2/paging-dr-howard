@@ -121,6 +121,10 @@ class MainActivity : ComponentActivity() {
                 MainPagerApp(
                     uiState = viewModel.uiState,
                     onUpdateMyName = { name -> viewModel.updateMyName(name) },
+                    onUpdateRelayServerUrl = { url ->
+                        viewModel.updateRelayServerUrl(url)
+                        startPushListenerService()
+                    },
                     onImportPairingCode = { code -> viewModel.importPairingCode(code) },
                     onDeleteContact = { id -> viewModel.deleteContact(id) },
                     onSelectContact = { contact -> viewModel.selectContactForPage(contact) },
@@ -221,6 +225,8 @@ class MainActivity : ComponentActivity() {
             val prefs = getSharedPreferences(DefaultPagerRepository.PREF_NAME, MODE_PRIVATE)
             val repository = DefaultPagerRepository(prefs)
 
+            val targetServer = contact.relayServerUrl.ifBlank { repository.getRelayServerUrl() }
+
             PushSender.sendPage(
                 targetTopicId = contact.topicId,
                 senderName = state.myName,
@@ -230,6 +236,7 @@ class MainActivity : ComponentActivity() {
                 recipientPublicKey = peerPublicKey,
                 pageLevel = pageLevel,
                 messageText = if (pageLevel == PageLevel.HEY_LOOK) "Hey look! Check your phone when free." else "EMERGENCY: Urgent assistance needed!",
+                serverUrl = targetServer,
                 onResult = { isSuccess, resultMsg ->
                     runOnUiThread {
                         Toast.makeText(this, resultMsg, Toast.LENGTH_LONG).show()
@@ -248,6 +255,7 @@ class MainActivity : ComponentActivity() {
 fun MainPagerApp(
     uiState: MainUiState,
     onUpdateMyName: (String) -> Unit,
+    onUpdateRelayServerUrl: (String) -> Unit,
     onImportPairingCode: (String) -> Boolean,
     onDeleteContact: (String) -> Unit,
     onSelectContact: (PairedContact) -> Unit,
@@ -332,6 +340,7 @@ fun MainPagerApp(
                     RecipientSetupScreen(
                         uiState = uiState,
                         onUpdateMyName = onUpdateMyName,
+                        onUpdateRelayServerUrl = onUpdateRelayServerUrl,
                         onImportPairingCode = onImportPairingCode,
                         onPasteFromClipboard = onPasteFromClipboard,
                         onScanQrCode = onScanQrCode,
@@ -447,6 +456,7 @@ fun FamilyContactsScreen(
 fun RecipientSetupScreen(
     uiState: MainUiState,
     onUpdateMyName: (String) -> Unit,
+    onUpdateRelayServerUrl: (String) -> Unit,
     onImportPairingCode: (String) -> Boolean,
     onPasteFromClipboard: () -> String?,
     onScanQrCode: () -> Unit,
@@ -457,6 +467,7 @@ fun RecipientSetupScreen(
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     var nameInput by remember(uiState.myName) { mutableStateOf(uiState.myName) }
+    var serverInput by remember(uiState.relayServerUrl) { mutableStateOf(uiState.relayServerUrl) }
     var pairingCodeInput by remember { mutableStateOf("") }
 
     Column(
@@ -691,6 +702,56 @@ fun RecipientSetupScreen(
 
         Spacer(modifier = Modifier.height(24.dp))
 
+        Spacer(modifier = Modifier.height(24.dp))
+
+        Text("Push Relay Server (Anti-DDoS / Multi-Host)", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+        Text("Primary relay server for push delivery with automatic polite failover.", fontSize = 12.sp, color = Color.Gray)
+        Spacer(modifier = Modifier.height(8.dp))
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFFF5F5F5))
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                OutlinedTextField(
+                    value = serverInput,
+                    onValueChange = {
+                        serverInput = it
+                        onUpdateRelayServerUrl(it)
+                    },
+                    label = { Text("Relay Server URL") },
+                    placeholder = { Text("https://ntfy.sh/") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = {
+                            serverInput = "https://ntfy.sh/"
+                            onUpdateRelayServerUrl("https://ntfy.sh/")
+                        },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Default (ntfy.sh)", fontSize = 11.sp)
+                    }
+                    OutlinedButton(
+                        onClick = {
+                            serverInput = "https://ntfy.adminforge.de/"
+                            onUpdateRelayServerUrl("https://ntfy.adminforge.de/")
+                        },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Mirror (adminforge)", fontSize = 11.sp)
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
         Text("About & Version", fontWeight = FontWeight.Bold, fontSize = 16.sp)
         Spacer(modifier = Modifier.height(8.dp))
         Card(
@@ -732,14 +793,23 @@ fun RecipientSetupScreen(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
+                    Text("Active Relay Server", fontSize = 12.sp, color = Color.Gray)
+                    Text(uiState.relayServerUrl, fontSize = 12.sp, color = Color.DarkGray)
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
                     Text("Protocol", fontSize = 12.sp, color = Color.Gray)
-                    Text("ntfy.sh + ECDSA P-256", fontSize = 12.sp, color = Color.DarkGray)
+                    Text("ntfy SSE + ECDSA P-256", fontSize = 12.sp, color = Color.DarkGray)
                 }
                 Spacer(modifier = Modifier.height(12.dp))
                 val context = androidx.compose.ui.platform.LocalContext.current
+                val monitorUrl = "${uiState.relayServerUrl.trimEnd('/')}/${uiState.myTopicId}"
                 OutlinedButton(
                     onClick = {
-                        val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse("https://ntfy.sh/${uiState.myTopicId}"))
+                        val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse(monitorUrl))
                         context.startActivity(browserIntent)
                     },
                     modifier = Modifier.fillMaxWidth()

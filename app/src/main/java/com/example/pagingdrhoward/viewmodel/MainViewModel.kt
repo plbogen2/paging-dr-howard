@@ -18,6 +18,7 @@ data class MainUiState(
     val myPublicKeyBase64: String = "",
     val myPairingCode: String = "",
     val familyPassphrase: String = "",
+    val relayServerUrl: String = "https://ntfy.sh/",
     val pairedContacts: List<PairedContact> = emptyList(),
     val isDndAccessGranted: Boolean = false,
     val isListening: Boolean = true,
@@ -44,9 +45,10 @@ class MainViewModel(private val repository: PagerRepository) : ViewModel() {
         val name = repository.getMyName()
         val pubKey = repository.getMyPublicKeyBase64()
         val passphrase = repository.getFamilyPassphrase()
+        val serverUrl = repository.getRelayServerUrl()
         val contacts = repository.getPairedContacts()
 
-        val pairingCode = PairingPayload.generatePairingCode(name, topicId, pubKey, passphrase)
+        val pairingCode = PairingPayload.generatePairingCode(name, topicId, pubKey, passphrase, serverUrl)
 
         uiState = uiState.copy(
             myTopicId = topicId,
@@ -54,6 +56,7 @@ class MainViewModel(private val repository: PagerRepository) : ViewModel() {
             myPublicKeyBase64 = pubKey,
             myPairingCode = pairingCode,
             familyPassphrase = passphrase,
+            relayServerUrl = serverUrl,
             pairedContacts = contacts
         )
     }
@@ -75,7 +78,7 @@ class MainViewModel(private val repository: PagerRepository) : ViewModel() {
         if (trimmed.isNotBlank()) {
             val oldName = uiState.myName
             repository.saveMyName(trimmed)
-            val pairingCode = PairingPayload.generatePairingCode(trimmed, uiState.myTopicId, uiState.myPublicKeyBase64, uiState.familyPassphrase)
+            val pairingCode = PairingPayload.generatePairingCode(trimmed, uiState.myTopicId, uiState.myPublicKeyBase64, uiState.familyPassphrase, uiState.relayServerUrl)
             uiState = uiState.copy(
                 myName = trimmed,
                 myPairingCode = pairingCode
@@ -95,7 +98,8 @@ class MainViewModel(private val repository: PagerRepository) : ViewModel() {
                         myTopicId = uiState.myTopicId,
                         myPublicKeyBase64 = uiState.myPublicKeyBase64,
                         myPrivateKey = myPrivateKey,
-                        peerPublicKey = peerPublicKey
+                        peerPublicKey = peerPublicKey,
+                        serverUrl = contact.relayServerUrl.ifBlank { uiState.relayServerUrl }
                     )
                 }
             }
@@ -108,13 +112,21 @@ class MainViewModel(private val repository: PagerRepository) : ViewModel() {
             return false
         }
         repository.saveFamilyPassphrase(passphrase)
-        val pairingCode = PairingPayload.generatePairingCode(uiState.myName, uiState.myTopicId, uiState.myPublicKeyBase64, passphrase)
+        val pairingCode = PairingPayload.generatePairingCode(uiState.myName, uiState.myTopicId, uiState.myPublicKeyBase64, passphrase, uiState.relayServerUrl)
         uiState = uiState.copy(
             familyPassphrase = passphrase,
             myPairingCode = pairingCode,
             successMessage = "Security Key saved successfully!"
         )
         return true
+    }
+
+    fun updateRelayServerUrl(url: String) {
+        val trimmed = url.trim()
+        if (trimmed.isNotBlank()) {
+            repository.saveRelayServerUrl(trimmed)
+            loadSettings()
+        }
     }
 
     fun importPairingCode(rawCode: String): Boolean {
@@ -129,6 +141,9 @@ class MainViewModel(private val repository: PagerRepository) : ViewModel() {
             repository.saveFamilyPassphrase(contact.passphrase)
         }
 
+        // If the peer specified a custom relay server, adopt it or use it for contacting them
+        val peerServer = contact.relayServerUrl.ifBlank { uiState.relayServerUrl }
+
         // Send silent mutual pairing handshake back to contact's topic
         val peerPublicKey = if (contact.publicKeyBase64.isNotBlank()) {
             try { CryptoManager.publicKeyFromBase64(contact.publicKeyBase64) } catch (e: Exception) { null }
@@ -140,7 +155,8 @@ class MainViewModel(private val repository: PagerRepository) : ViewModel() {
             myTopicId = uiState.myTopicId,
             myPublicKeyBase64 = uiState.myPublicKeyBase64,
             myPrivateKey = repository.getMyPrivateKey(),
-            peerPublicKey = peerPublicKey
+            peerPublicKey = peerPublicKey,
+            serverUrl = peerServer
         )
 
         loadSettings()

@@ -25,6 +25,21 @@ class PairingPayloadTest {
     }
 
     @Test
+    fun `test generate and parse pairing code with custom relay server roundtrip`() {
+        val name = "Mom"
+        val topicId = "pdh_mom_12345"
+        val serverUrl = "https://ntfy.adminforge.de/"
+
+        val pairingCode = PairingPayload.generatePairingCode(name, topicId, "", "", serverUrl)
+        val contact = PairingPayload.parsePairingCode(pairingCode)
+
+        assertNotNull(contact)
+        assertEquals("Mom", contact?.name)
+        assertEquals(topicId, contact?.topicId)
+        assertEquals(serverUrl, contact?.relayServerUrl)
+    }
+
+    @Test
     fun `test parse invalid pairing code returns null`() {
         val invalidCode = "ThisIsInvalidCode"
         val contact = PairingPayload.parsePairingCode(invalidCode)

@@ -13,8 +13,22 @@ import java.security.PublicKey
 
 object PushSender {
     private const val TAG = "PushSender"
+    const val DEFAULT_NTFY_BASE_URL = "https://ntfy.sh/"
     const val NTFY_BASE_URL = "https://ntfy.sh/"
-    private val client = OkHttpClient()
+    const val USER_AGENT = "PagingDrHoward/1.0 (Android Emergency Pager; +https://github.com/plbogen2/paging-dr-howard)"
+
+    val FALLBACK_SERVERS = listOf(
+        "https://ntfy.sh/",
+        "https://ntfy.adminforge.de/",
+        "https://ntfy.tedomum.fr/"
+    )
+
+    private val client = OkHttpClient.Builder()
+        .connectTimeout(8, java.util.concurrent.TimeUnit.SECONDS)
+        .writeTimeout(8, java.util.concurrent.TimeUnit.SECONDS)
+        .readTimeout(8, java.util.concurrent.TimeUnit.SECONDS)
+        .retryOnConnectionFailure(true)
+        .build()
 
     data class PageMessage(
         val type: String = "PAGE",
@@ -68,7 +82,8 @@ object PushSender {
     }
 
     /**
-     * Sends an encrypted, high-priority emergency page to target contact's private topic on ntfy.sh.
+     * Sends an encrypted, high-priority emergency page to target contact's private topic on ntfy.
+     * Tries preferred serverUrl first; if network fails/times out, fails over to alternate public relays.
      */
     fun sendPage(
         targetTopicId: String,
@@ -79,9 +94,10 @@ object PushSender {
         recipientPublicKey: PublicKey?,
         pageLevel: PageLevel = PageLevel.SOS,
         messageText: String = "",
+        serverUrl: String = DEFAULT_NTFY_BASE_URL,
         onResult: (Boolean, String) -> Unit
     ) {
-        val topic = targetTopicId.trim().removePrefix(NTFY_BASE_URL).removePrefix("/")
+        val topic = targetTopicId.trim().substringAfterLast("/")
         if (topic.isBlank()) {
             onResult(false, "Recipient topic address is required")
             return
@@ -97,31 +113,57 @@ object PushSender {
         )
 
         val jsonPayload = buildPayloadJson(msg, senderPrivateKey, recipientPublicKey)
-        val url = "$NTFY_BASE_URL$topic"
-
         val cleanTitle = "${pageLevel.name.replace('_', ' ')} from $senderName".filter { it.code in 32..126 }
 
-        val request = Request.Builder()
-            .url(url)
-            .addHeader("Priority", if (pageLevel == PageLevel.SOS) "5" else "4")
-            .addHeader("Title", cleanTitle.ifBlank { "Emergency Alert" })
-            .addHeader("Tags", if (pageLevel == PageLevel.SOS) "rotating_light,sos" else "eyes,bell")
-            .addHeader("Content-Type", "application/json")
-            .post(jsonPayload.toRequestBody("application/json; charset=utf-8".toMediaType()))
-            .build()
+        val serverCandidates = mutableListOf<String>()
+        val primary = if (serverUrl.isNotBlank()) (if (serverUrl.endsWith("/")) serverUrl else "$serverUrl/") else DEFAULT_NTFY_BASE_URL
+        serverCandidates.add(primary)
+        FALLBACK_SERVERS.forEach { fb ->
+            if (!serverCandidates.contains(fb)) serverCandidates.add(fb)
+        }
 
-        client.newCall(request).enqueue(object : Callback {
-            override fun onFailure(call: Call, e: IOException) {
-                Log.e(TAG, "Failed to send page: ${e.localizedMessage}")
-                onResult(false, "Network error: ${e.localizedMessage}")
+        fun trySendCandidate(candidateIndex: Int) {
+            if (candidateIndex >= serverCandidates.size) {
+                onResult(false, "Network error: Unable to reach any push relays. Please check internet connection.")
+                return
             }
 
-            override fun onResponse(call: Call, response: Response) {
-                val isSuccess = response.isSuccessful
-                Log.d(TAG, "Page sent response code: ${response.code}")
-                onResult(isSuccess, if (isSuccess) "${pageLevel.title} sent successfully!" else "Error (${response.code}) sending page")
-            }
-        })
+            val currentBase = serverCandidates[candidateIndex]
+            val url = "$currentBase$topic"
+
+            val request = Request.Builder()
+                .url(url)
+                .addHeader("User-Agent", USER_AGENT)
+                .addHeader("Priority", if (pageLevel == PageLevel.SOS) "5" else "4")
+                .addHeader("Title", cleanTitle.ifBlank { "Emergency Alert" })
+                .addHeader("Tags", if (pageLevel == PageLevel.SOS) "rotating_light,sos" else "eyes,bell")
+                .addHeader("Content-Type", "application/json")
+                .post(jsonPayload.toRequestBody("application/json; charset=utf-8".toMediaType()))
+                .build()
+
+            client.newCall(request).enqueue(object : Callback {
+                override fun onFailure(call: Call, e: IOException) {
+                    Log.w(TAG, "Push dispatch failed on $currentBase: ${e.localizedMessage}. Attempting failover...")
+                    trySendCandidate(candidateIndex + 1)
+                }
+
+                override fun onResponse(call: Call, response: Response) {
+                    if (response.isSuccessful) {
+                        Log.d(TAG, "Page successfully sent via $currentBase (code: ${response.code})")
+                        onResult(true, "${pageLevel.title} sent successfully!")
+                    } else if (response.code == 429) {
+                        val retryAfter = response.header("Retry-After") ?: "a few moments"
+                        Log.w(TAG, "Rate limited (429) on $currentBase, retry after: $retryAfter")
+                        trySendCandidate(candidateIndex + 1)
+                    } else {
+                        Log.w(TAG, "Server returned error ${response.code} on $currentBase")
+                        trySendCandidate(candidateIndex + 1)
+                    }
+                }
+            })
+        }
+
+        trySendCandidate(0)
     }
 
     /**
@@ -134,9 +176,10 @@ object PushSender {
         myPublicKeyBase64: String,
         myPrivateKey: PrivateKey?,
         peerPublicKey: PublicKey?,
+        serverUrl: String = DEFAULT_NTFY_BASE_URL,
         onResult: (Boolean) -> Unit = {}
     ) {
-        val topic = targetTopicId.trim().removePrefix(NTFY_BASE_URL).removePrefix("/")
+        val topic = targetTopicId.trim().substringAfterLast("/")
         if (topic.isBlank()) return
 
         val msg = PageMessage(
@@ -150,22 +193,44 @@ object PushSender {
 
         val jsonPayload = buildPayloadJson(msg, myPrivateKey, peerPublicKey)
         val cleanSender = myName.filter { it.code in 32..126 }
-        val request = Request.Builder()
-            .url("$NTFY_BASE_URL$topic")
-            .addHeader("Priority", "3")
-            .addHeader("Title", "Pairing Handshake from ${cleanSender.ifBlank { "Family" }}")
-            .addHeader("Content-Type", "application/json")
-            .post(jsonPayload.toRequestBody("application/json; charset=utf-8".toMediaType()))
-            .build()
 
-        client.newCall(request).enqueue(object : Callback {
-            override fun onFailure(call: Call, e: IOException) {
+        val serverCandidates = mutableListOf<String>()
+        val primary = if (serverUrl.isNotBlank()) (if (serverUrl.endsWith("/")) serverUrl else "$serverUrl/") else DEFAULT_NTFY_BASE_URL
+        serverCandidates.add(primary)
+        FALLBACK_SERVERS.forEach { fb ->
+            if (!serverCandidates.contains(fb)) serverCandidates.add(fb)
+        }
+
+        fun trySendCandidate(candidateIndex: Int) {
+            if (candidateIndex >= serverCandidates.size) {
                 onResult(false)
+                return
             }
-            override fun onResponse(call: Call, response: Response) {
-                onResult(response.isSuccessful)
-            }
-        })
+            val currentBase = serverCandidates[candidateIndex]
+            val request = Request.Builder()
+                .url("$currentBase$topic")
+                .addHeader("User-Agent", USER_AGENT)
+                .addHeader("Priority", "3")
+                .addHeader("Title", "Pairing Handshake from ${cleanSender.ifBlank { "Family" }}")
+                .addHeader("Content-Type", "application/json")
+                .post(jsonPayload.toRequestBody("application/json; charset=utf-8".toMediaType()))
+                .build()
+
+            client.newCall(request).enqueue(object : Callback {
+                override fun onFailure(call: Call, e: IOException) {
+                    trySendCandidate(candidateIndex + 1)
+                }
+                override fun onResponse(call: Call, response: Response) {
+                    if (response.isSuccessful) {
+                        onResult(true)
+                    } else {
+                        trySendCandidate(candidateIndex + 1)
+                    }
+                }
+            })
+        }
+
+        trySendCandidate(0)
     }
 
     /**
@@ -178,9 +243,10 @@ object PushSender {
         myPublicKeyBase64: String,
         myPrivateKey: PrivateKey?,
         peerPublicKey: PublicKey?,
+        serverUrl: String = DEFAULT_NTFY_BASE_URL,
         onResult: (Boolean) -> Unit = {}
     ) {
-        val topic = targetTopicId.trim().removePrefix(NTFY_BASE_URL).removePrefix("/")
+        val topic = targetTopicId.trim().substringAfterLast("/")
         if (topic.isBlank()) return
 
         val msg = PageMessage(
@@ -194,21 +260,43 @@ object PushSender {
 
         val jsonPayload = buildPayloadJson(msg, myPrivateKey, peerPublicKey)
         val cleanSender = newName.filter { it.code in 32..126 }
-        val request = Request.Builder()
-            .url("$NTFY_BASE_URL$topic")
-            .addHeader("Priority", "2")
-            .addHeader("Title", "Name Update from ${cleanSender.ifBlank { "Family" }}")
-            .addHeader("Content-Type", "application/json")
-            .post(jsonPayload.toRequestBody("application/json; charset=utf-8".toMediaType()))
-            .build()
 
-        client.newCall(request).enqueue(object : Callback {
-            override fun onFailure(call: Call, e: IOException) {
+        val serverCandidates = mutableListOf<String>()
+        val primary = if (serverUrl.isNotBlank()) (if (serverUrl.endsWith("/")) serverUrl else "$serverUrl/") else DEFAULT_NTFY_BASE_URL
+        serverCandidates.add(primary)
+        FALLBACK_SERVERS.forEach { fb ->
+            if (!serverCandidates.contains(fb)) serverCandidates.add(fb)
+        }
+
+        fun trySendCandidate(candidateIndex: Int) {
+            if (candidateIndex >= serverCandidates.size) {
                 onResult(false)
+                return
             }
-            override fun onResponse(call: Call, response: Response) {
-                onResult(response.isSuccessful)
-            }
-        })
+            val currentBase = serverCandidates[candidateIndex]
+            val request = Request.Builder()
+                .url("$currentBase$topic")
+                .addHeader("User-Agent", USER_AGENT)
+                .addHeader("Priority", "2")
+                .addHeader("Title", "Name Update from ${cleanSender.ifBlank { "Family" }}")
+                .addHeader("Content-Type", "application/json")
+                .post(jsonPayload.toRequestBody("application/json; charset=utf-8".toMediaType()))
+                .build()
+
+            client.newCall(request).enqueue(object : Callback {
+                override fun onFailure(call: Call, e: IOException) {
+                    trySendCandidate(candidateIndex + 1)
+                }
+                override fun onResponse(call: Call, response: Response) {
+                    if (response.isSuccessful) {
+                        onResult(true)
+                    } else {
+                        trySendCandidate(candidateIndex + 1)
+                    }
+                }
+            })
+        }
+
+        trySendCandidate(0)
     }
 }

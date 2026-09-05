@@ -9,6 +9,7 @@ data class PairedContact(
     val topicId: String,
     val publicKeyBase64: String = "",
     val passphrase: String = "",
+    val relayServerUrl: String = "",
     val addedAt: Long = System.currentTimeMillis()
 ) {
     fun toJson(): JSONObject {
@@ -18,6 +19,7 @@ data class PairedContact(
             put("topicId", topicId)
             put("publicKeyBase64", publicKeyBase64)
             put("passphrase", passphrase)
+            put("relayServerUrl", relayServerUrl)
             put("addedAt", addedAt)
         }
     }
@@ -30,6 +32,7 @@ data class PairedContact(
                 topicId = json.optString("topicId", json.optString("fcmToken", "")),
                 publicKeyBase64 = json.optString("publicKeyBase64", ""),
                 passphrase = json.optString("passphrase", ""),
+                relayServerUrl = json.optString("relayServerUrl", json.optString("serverUrl", "")),
                 addedAt = json.optLong("addedAt", System.currentTimeMillis())
             )
         }

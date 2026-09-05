@@ -27,11 +27,13 @@ class PushListenerService : Service() {
 
     private var eventSource: EventSource? = null
     private val processedMessageSignatures = mutableSetOf<String>()
-    private var serviceStartTimeMs = System.currentTimeMillis()
+    private var reconnectAttempt = 0
+    private var currentServerIndex = 0
 
     private val sseClient = OkHttpClient.Builder()
         .readTimeout(0, TimeUnit.MILLISECONDS)
-        .pingInterval(30, TimeUnit.SECONDS)
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .pingInterval(45, TimeUnit.SECONDS)
         .retryOnConnectionFailure(true)
         .build()
 
@@ -58,16 +60,25 @@ class PushListenerService : Service() {
         val repository = DefaultPagerRepository(prefs)
         val myTopicId = repository.getMyTopicId()
 
-        // ntfy /sse endpoint automatically streams new events in real time. Do not pass invalid since=now.
-        val sseUrl = "${PushSender.NTFY_BASE_URL}$myTopicId/sse"
+        val userServer = repository.getRelayServerUrl()
+        val serverCandidates = mutableListOf<String>()
+        if (userServer.isNotBlank()) serverCandidates.add(userServer)
+        PushSender.FALLBACK_SERVERS.forEach { fb ->
+            if (!serverCandidates.contains(fb)) serverCandidates.add(fb)
+        }
+
+        val base = serverCandidates[currentServerIndex % serverCandidates.size]
+        val sseUrl = "$base$myTopicId/sse"
         val request = Request.Builder()
             .url(sseUrl)
+            .addHeader("User-Agent", PushSender.USER_AGENT)
             .build()
 
         val factory = EventSources.createFactory(sseClient)
         eventSource = factory.newEventSource(request, object : EventSourceListener() {
             override fun onOpen(eventSource: EventSource, response: Response) {
-                Log.d(TAG, "Connected to ntfy push stream on topic: $myTopicId")
+                Log.d(TAG, "Connected to ntfy push stream on $base ($myTopicId)")
+                reconnectAttempt = 0 // Reset backoff on successful connection
             }
 
             override fun onEvent(eventSource: EventSource, id: String?, type: String?, data: String) {
@@ -75,7 +86,7 @@ class PushListenerService : Service() {
                 try {
                     val json = JSONObject(data)
                     val eventType = json.optString("event", "message")
-                    // Ignore open / keepalive events from ntfy.sh
+                    // Ignore open / keepalive events from ntfy
                     if (eventType != "message") return
 
                     val rawMessage = json.optString("message", "")
@@ -88,19 +99,35 @@ class PushListenerService : Service() {
             }
 
             override fun onClosed(eventSource: EventSource) {
-                Log.d(TAG, "Push stream closed, reconnecting in 3s...")
-                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                    startSseListener()
-                }, 3000)
+                schedulePoliteReconnect("Stream closed")
             }
 
             override fun onFailure(eventSource: EventSource, t: Throwable?, response: Response?) {
-                Log.w(TAG, "Push stream connection failure: ${t?.localizedMessage}, reconnecting in 5s...")
-                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                    startSseListener()
-                }, 5000)
+                // If 429 Too Many Requests, cycle server
+                if (response?.code == 429) {
+                    currentServerIndex++
+                    Log.w(TAG, "Server $base returned 429 (Too Many Requests). Switching to next relay...")
+                } else if (reconnectAttempt >= 2) {
+                    // Failover after 2 consecutive connection failures on this server
+                    currentServerIndex++
+                    Log.w(TAG, "Connection failed on $base, failing over to next relay...")
+                }
+                schedulePoliteReconnect("Connection failure: ${t?.localizedMessage ?: response?.code}")
             }
         })
+    }
+
+    private fun schedulePoliteReconnect(reason: String) {
+        reconnectAttempt++
+        // Exponential backoff: 5s, 10s, 20s, up to 60s max + random jitter (0-3s)
+        val backoffSeconds = (5L * (1L shl (reconnectAttempt - 1).coerceAtMost(4))).coerceAtMost(60L)
+        val jitterMs = (Math.random() * 3000).toLong()
+        val delayMs = (backoffSeconds * 1000) + jitterMs
+
+        Log.d(TAG, "$reason. Polite backoff #$reconnectAttempt: reconnecting in ${delayMs / 1000}s...")
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+            startSseListener()
+        }, delayMs)
     }
 
     private fun processIncomingPayload(payloadStr: String, repository: DefaultPagerRepository) {

@@ -15,6 +15,8 @@ interface PagerRepository {
     fun getMyPublicKey(): PublicKey?
     fun getFamilyPassphrase(): String
     fun saveFamilyPassphrase(passphrase: String)
+    fun getRelayServerUrl(): String
+    fun saveRelayServerUrl(url: String)
     fun getPairedContacts(): List<PairedContact>
     fun savePairedContact(contact: PairedContact)
     fun deletePairedContact(contactId: String)
@@ -93,6 +95,21 @@ class DefaultPagerRepository(private val sharedPreferences: SharedPreferences) :
         sharedPreferences.edit().putString(KEY_FAMILY_PASSPHRASE, passphrase).apply()
     }
 
+    override fun getRelayServerUrl(): String {
+        val url = sharedPreferences.getString(KEY_RELAY_SERVER_URL, "")?.trim() ?: ""
+        return if (url.isNotBlank()) {
+            if (!url.endsWith("/")) "$url/" else url
+        } else {
+            DEFAULT_RELAY_SERVER_URL
+        }
+    }
+
+    override fun saveRelayServerUrl(url: String) {
+        val trimmed = url.trim()
+        val formatted = if (trimmed.isNotBlank() && !trimmed.endsWith("/")) "$trimmed/" else trimmed
+        sharedPreferences.edit().putString(KEY_RELAY_SERVER_URL, formatted).apply()
+    }
+
     override fun getPairedContacts(): List<PairedContact> {
         val jsonStr = sharedPreferences.getString(KEY_PAIRED_CONTACTS, null)
         return PairedContact.listFromJsonString(jsonStr)
@@ -123,6 +140,8 @@ class DefaultPagerRepository(private val sharedPreferences: SharedPreferences) :
         const val KEY_MY_PUBLIC_KEY = "my_public_key"
         const val KEY_MY_PRIVATE_KEY = "my_private_key"
         const val KEY_FAMILY_PASSPHRASE = "family_passphrase"
+        const val KEY_RELAY_SERVER_URL = "relay_server_url"
         const val KEY_PAIRED_CONTACTS = "paired_contacts"
+        const val DEFAULT_RELAY_SERVER_URL = "https://ntfy.sh/"
     }
 }
