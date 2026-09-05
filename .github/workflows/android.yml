@@ -47,18 +47,22 @@ jobs:
       env:
         BUILD_NUMBER: ${{ env.BUILD_NUMBER }}
 
-    - name: Upload Debug APK Artifact
+    - name: Package Named Release APK
+      run: |
+        cp app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/debug/PagingDrHoward.apk
+
+    - name: Upload APK Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: paging-dr-howard-debug-apk-${{ env.BUILD_NUMBER }}
-        path: app/build/outputs/apk/debug/app-debug.apk
+        name: PagingDrHoward-${{ env.BUILD_NUMBER }}
+        path: app/build/outputs/apk/debug/PagingDrHoward.apk
 
     - name: Create GitHub Release on Green
       if: github.ref == 'refs/heads/master' && github.event_name == 'push'
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
-        gh release create "${BUILD_TAG}" app/build/outputs/apk/debug/app-debug.apk \
+        gh release create "${BUILD_TAG}" app/build/outputs/apk/debug/PagingDrHoward.apk \
           --title "Paging Dr. Howard ${BUILD_TAG} Release 📟" \
           --notes "### Paging Dr. Howard ${BUILD_TAG} 📟🔐
           Automated Release compiled on green CI test pass.
