@@ -16,6 +16,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
 
     - name: Set up JDK 17
       uses: actions/setup-java@v4
@@ -64,14 +66,32 @@ jobs:
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
+        PREV_TAG=$(git tag --sort=-creatordate | head -n 1 || true)
+        if [ -n "$PREV_TAG" ]; then
+          CHANGELOG=$(git log "$PREV_TAG"..HEAD --pretty=format:"- %s (%h)" || git log -n 5 --pretty=format:"- %s (%h)")
+        else
+          CHANGELOG=$(git log -n 5 --pretty=format:"- %s (%h)")
+        fi
+
+        if [ -z "$CHANGELOG" ]; then
+          CHANGELOG="- Bug fixes and performance improvements"
+        fi
+
+        cat <<EOF > release_notes.md
+### Paging Dr. Howard ${BUILD_TAG} 📟🔐
+
+#### 🌟 What's New in this Version:
+${CHANGELOG}
+
+---
+**Core Features**:
+- Multi-Level Paging: (1) Hey look! and (2) SOS Emergency
+- Bidirectional Family Phone Pairing & Address Book
+- DND & Silent Mode Override via USAGE_ALARM
+- ECDH & ECDSA Public/Private Key Cryptography per pairing
+- 4-Digit Versioning System (${BUILD_TAG})
+EOF
+
         gh release create "${BUILD_TAG}" app/build/outputs/apk/debug/PagingDrHoward.apk \
           --title "Paging Dr. Howard ${BUILD_TAG} Release 📟" \
-          --notes "### Paging Dr. Howard ${BUILD_TAG} 📟🔐
-          Automated Release compiled on green CI test pass.
-          
-          **Features**:
-          - Multi-Level Paging: (1) Hey look! and (2) SOS Emergency
-          - Bidirectional Family Phone Pairing & Address Book
-          - DND & Silent Mode Override via USAGE_ALARM
-          - ECDH & ECDSA Public/Private Key Cryptography per pairing
-          - 4-Digit Versioning System (${BUILD_TAG})"
+          --notes-file release_notes.md
