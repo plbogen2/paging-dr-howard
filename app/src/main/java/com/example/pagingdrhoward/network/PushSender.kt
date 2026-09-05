@@ -164,7 +164,8 @@ object PushSender {
     }
 
     /**
-     * Sends an automatic bidirectional pairing handshake to the other device so both devices add each other mutually.
+     * Sends an automatic bidirectional pairing handshake or reply to the other device.
+     * Uses parallel multi-relay broadcast for guaranteed delivery.
      */
     fun sendPairingHandshake(
         targetTopicId: String,
@@ -173,6 +174,7 @@ object PushSender {
         myPublicKeyBase64: String,
         myPrivateKey: PrivateKey?,
         peerPublicKey: PublicKey?,
+        isReply: Boolean = false,
         serverUrl: String = DEFAULT_NTFY_BASE_URL,
         onResult: (Boolean) -> Unit = {}
     ) {
@@ -180,12 +182,12 @@ object PushSender {
         if (topic.isBlank()) return
 
         val msg = PageMessage(
-            type = "PAIRING_HANDSHAKE",
+            type = if (isReply) "PAIRING_HANDSHAKE_REPLY" else "PAIRING_HANDSHAKE",
             senderName = myName,
             senderTopicId = myTopicId,
             senderPublicKeyBase64 = myPublicKeyBase64,
             level = PageLevel.HEY_LOOK,
-            messageText = "HANDSHAKE"
+            messageText = if (isReply) "HANDSHAKE_REPLY" else "HANDSHAKE"
         )
 
         val jsonPayload = buildPayloadJson(msg, myPrivateKey, peerPublicKey)
@@ -198,40 +200,43 @@ object PushSender {
             if (!serverCandidates.contains(fb)) serverCandidates.add(fb)
         }
 
-        fun trySendCandidate(candidateIndex: Int) {
-            if (candidateIndex >= serverCandidates.size) {
-                onResult(false)
-                return
-            }
-            val currentBase = serverCandidates[candidateIndex]
+        val completedCount = java.util.concurrent.atomic.AtomicInteger(0)
+        val hasSucceeded = java.util.concurrent.atomic.AtomicBoolean(false)
+        val totalServers = serverCandidates.size
+
+        serverCandidates.forEach { base ->
             val request = Request.Builder()
-                .url("$currentBase$topic")
+                .url("$base$topic")
                 .addHeader("User-Agent", USER_AGENT)
                 .addHeader("Priority", "3")
-                .addHeader("Title", "Pairing Handshake from ${cleanSender.ifBlank { "Family" }}")
+                .addHeader("Title", if (isReply) "Pairing Confirmed by ${cleanSender.ifBlank { "Family" }}" else "Pairing Handshake from ${cleanSender.ifBlank { "Family" }}")
                 .addHeader("Content-Type", "application/json")
                 .post(jsonPayload.toRequestBody("application/json; charset=utf-8".toMediaType()))
                 .build()
 
             client.newCall(request).enqueue(object : Callback {
                 override fun onFailure(call: Call, e: IOException) {
-                    trySendCandidate(candidateIndex + 1)
+                    if (completedCount.incrementAndGet() == totalServers && !hasSucceeded.get()) {
+                        onResult(false)
+                    }
                 }
                 override fun onResponse(call: Call, response: Response) {
                     if (response.isSuccessful) {
-                        onResult(true)
-                    } else {
-                        trySendCandidate(candidateIndex + 1)
+                        if (hasSucceeded.compareAndSet(false, true)) {
+                            onResult(true)
+                        }
+                    }
+                    if (completedCount.incrementAndGet() == totalServers && !hasSucceeded.get()) {
+                        onResult(false)
                     }
                 }
             })
         }
-
-        trySendCandidate(0)
     }
 
     /**
      * Broadcasts a display name change to a paired contact so their local address book updates automatically.
+     * Dispatches in parallel across all relays.
      */
     fun sendNameUpdate(
         targetTopicId: String,
@@ -265,14 +270,13 @@ object PushSender {
             if (!serverCandidates.contains(fb)) serverCandidates.add(fb)
         }
 
-        fun trySendCandidate(candidateIndex: Int) {
-            if (candidateIndex >= serverCandidates.size) {
-                onResult(false)
-                return
-            }
-            val currentBase = serverCandidates[candidateIndex]
+        val completedCount = java.util.concurrent.atomic.AtomicInteger(0)
+        val hasSucceeded = java.util.concurrent.atomic.AtomicBoolean(false)
+        val totalServers = serverCandidates.size
+
+        serverCandidates.forEach { base ->
             val request = Request.Builder()
-                .url("$currentBase$topic")
+                .url("$base$topic")
                 .addHeader("User-Agent", USER_AGENT)
                 .addHeader("Priority", "2")
                 .addHeader("Title", "Name Update from ${cleanSender.ifBlank { "Family" }}")
@@ -282,18 +286,91 @@ object PushSender {
 
             client.newCall(request).enqueue(object : Callback {
                 override fun onFailure(call: Call, e: IOException) {
-                    trySendCandidate(candidateIndex + 1)
+                    if (completedCount.incrementAndGet() == totalServers && !hasSucceeded.get()) {
+                        onResult(false)
+                    }
                 }
                 override fun onResponse(call: Call, response: Response) {
                     if (response.isSuccessful) {
-                        onResult(true)
-                    } else {
-                        trySendCandidate(candidateIndex + 1)
+                        if (hasSucceeded.compareAndSet(false, true)) {
+                            onResult(true)
+                        }
+                    }
+                    if (completedCount.incrementAndGet() == totalServers && !hasSucceeded.get()) {
+                        onResult(false)
                     }
                 }
             })
         }
+    }
 
-        trySendCandidate(0)
+    /**
+     * Sends an acknowledgment receipt packet back to the origin phone topic when an alert is acknowledged/dismissed.
+     */
+    fun sendAlertAck(
+        targetTopicId: String,
+        acknowledgerName: String,
+        myTopicId: String,
+        myPublicKeyBase64: String,
+        myPrivateKey: PrivateKey?,
+        peerPublicKey: PublicKey?,
+        serverUrl: String = DEFAULT_NTFY_BASE_URL,
+        onResult: (Boolean) -> Unit = {}
+    ) {
+        val topic = targetTopicId.trim().substringAfterLast("/")
+        if (topic.isBlank()) return
+
+        val msg = PageMessage(
+            type = "PAGE_ACK",
+            senderName = acknowledgerName,
+            senderTopicId = myTopicId,
+            senderPublicKeyBase64 = myPublicKeyBase64,
+            level = PageLevel.HEY_LOOK,
+            messageText = "Alert Acknowledged by $acknowledgerName"
+        )
+
+        val jsonPayload = buildPayloadJson(msg, myPrivateKey, peerPublicKey)
+        val cleanSender = acknowledgerName.filter { it.code in 32..126 }
+
+        val serverCandidates = mutableListOf<String>()
+        val primary = if (serverUrl.isNotBlank()) (if (serverUrl.endsWith("/")) serverUrl else "$serverUrl/") else DEFAULT_NTFY_BASE_URL
+        serverCandidates.add(primary)
+        FALLBACK_SERVERS.forEach { fb ->
+            if (!serverCandidates.contains(fb)) serverCandidates.add(fb)
+        }
+
+        val completedCount = java.util.concurrent.atomic.AtomicInteger(0)
+        val hasSucceeded = java.util.concurrent.atomic.AtomicBoolean(false)
+        val totalServers = serverCandidates.size
+
+        serverCandidates.forEach { base ->
+            val request = Request.Builder()
+                .url("$base$topic")
+                .addHeader("User-Agent", USER_AGENT)
+                .addHeader("Priority", "4")
+                .addHeader("Title", "Page Acknowledged by ${cleanSender.ifBlank { "Family" }} ✔")
+                .addHeader("Tags", "white_check_mark")
+                .addHeader("Content-Type", "application/json")
+                .post(jsonPayload.toRequestBody("application/json; charset=utf-8".toMediaType()))
+                .build()
+
+            client.newCall(request).enqueue(object : Callback {
+                override fun onFailure(call: Call, e: IOException) {
+                    if (completedCount.incrementAndGet() == totalServers && !hasSucceeded.get()) {
+                        onResult(false)
+                    }
+                }
+                override fun onResponse(call: Call, response: Response) {
+                    if (response.isSuccessful) {
+                        if (hasSucceeded.compareAndSet(false, true)) {
+                            onResult(true)
+                        }
+                    }
+                    if (completedCount.incrementAndGet() == totalServers && !hasSucceeded.get()) {
+                        onResult(false)
+                    }
+                }
+            })
+        }
     }
 }

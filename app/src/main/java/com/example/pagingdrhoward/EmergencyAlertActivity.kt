@@ -43,6 +43,7 @@ class EmergencyAlertActivity : ComponentActivity() {
         }
 
         val senderName = intent.getStringExtra("EXTRA_SENDER") ?: "Family Member"
+        val senderTopic = intent.getStringExtra("EXTRA_SENDER_TOPIC") ?: ""
         val messageText = intent.getStringExtra("EXTRA_MESSAGE") ?: "URGENT: Please respond immediately!"
         val levelCode = intent.getStringExtra("EXTRA_LEVEL")
         val pageLevel = PageLevel.fromCode(levelCode)
@@ -52,23 +53,45 @@ class EmergencyAlertActivity : ComponentActivity() {
                 pageLevel = pageLevel,
                 senderName = senderName,
                 messageText = messageText,
-                onDismiss = { dismissPage() }
+                onDismiss = { dismissPage(senderTopic) }
             )
         }
     }
 
-    private fun dismissPage() {
+    private fun dismissPage(senderTopic: String) {
         val stopServiceIntent = Intent(this, EmergencyPagerService::class.java).apply {
             action = EmergencyPagerService.ACTION_STOP_ALARM
         }
         startService(stopServiceIntent)
+
+        // Send acknowledgment receipt back to sender's topic
+        if (senderTopic.isNotBlank()) {
+            val prefs = getSharedPreferences(com.example.pagingdrhoward.data.DefaultPagerRepository.PREF_NAME, MODE_PRIVATE)
+            val repository = com.example.pagingdrhoward.data.DefaultPagerRepository(prefs)
+            val contact = repository.getPairedContacts().find { it.topicId == senderTopic }
+            val peerPublicKey = if (contact != null && contact.publicKeyBase64.isNotBlank()) {
+                try { com.example.pagingdrhoward.util.CryptoManager.publicKeyFromBase64(contact.publicKeyBase64) } catch (e: Exception) { null }
+            } else null
+
+            com.example.pagingdrhoward.network.PushSender.sendAlertAck(
+                targetTopicId = senderTopic,
+                acknowledgerName = repository.getMyName(),
+                myTopicId = repository.getMyTopicId(),
+                myPublicKeyBase64 = repository.getMyPublicKeyBase64(),
+                myPrivateKey = repository.getMyPrivateKey(),
+                peerPublicKey = peerPublicKey,
+                serverUrl = repository.getRelayServerUrl()
+            )
+        }
+
         finish()
     }
 
     companion object {
-        fun createIntent(context: Context, sender: String?, message: String?, level: PageLevel): Intent {
+        fun createIntent(context: Context, sender: String?, senderTopic: String?, message: String?, level: PageLevel): Intent {
             return Intent(context, EmergencyAlertActivity::class.java).apply {
                 putExtra("EXTRA_SENDER", sender)
+                putExtra("EXTRA_SENDER_TOPIC", senderTopic)
                 putExtra("EXTRA_MESSAGE", message)
                 putExtra("EXTRA_LEVEL", level.code)
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
@@ -154,8 +177,8 @@ fun EmergencyAlertScreen(pageLevel: PageLevel, senderName: String, messageText: 
                     .height(64.dp)
             ) {
                 Text(
-                    text = "DISMISS ALERT",
-                    fontSize = 20.sp,
+                    text = "ACKNOWLEDGE & DISMISS 🔕",
+                    fontSize = 18.sp,
                     fontWeight = FontWeight.Bold,
                     color = backgroundColor
                 )

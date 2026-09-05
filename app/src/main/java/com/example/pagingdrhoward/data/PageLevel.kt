@@ -9,7 +9,7 @@ enum class PageLevel(
     HEY_LOOK(
         code = "HEY_LOOK",
         title = "Hey look! 👀",
-        isLoopingSound = false,
+        isLoopingSound = true,
         colorHex = 0xFF1976D2 // Blue
     ),
     SOS(

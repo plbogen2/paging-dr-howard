@@ -162,7 +162,7 @@ class PushListenerService : Service() {
                 processedMessageSignatures.clear()
             }
 
-            if (type == "PAIRING_HANDSHAKE" || type == "NAME_UPDATE") {
+            if (type == "PAIRING_HANDSHAKE" || type == "PAIRING_HANDSHAKE_REPLY" || type == "NAME_UPDATE") {
                 // Auto-save or update contact in address book
                 if (senderTopicId.isNotBlank()) {
                     val existing = repository.getPairedContacts().find { it.topicId == senderTopicId }
@@ -175,7 +175,40 @@ class PushListenerService : Service() {
                     )
                     repository.savePairedContact(contact)
                     Log.i(TAG, "Processed $type for contact: $senderName ($senderTopicId)")
+
+                    // If this is an initial PAIRING_HANDSHAKE (not a reply), immediately reply so pairing is bidirectional!
+                    if (type == "PAIRING_HANDSHAKE") {
+                        val peerPublicKey = if (senderPubKeyBase64.isNotBlank()) {
+                            try { CryptoManager.publicKeyFromBase64(senderPubKeyBase64) } catch (e: Exception) { null }
+                        } else null
+
+                        PushSender.sendPairingHandshake(
+                            targetTopicId = senderTopicId,
+                            myName = repository.getMyName(),
+                            myTopicId = repository.getMyTopicId(),
+                            myPublicKeyBase64 = repository.getMyPublicKeyBase64(),
+                            myPrivateKey = repository.getMyPrivateKey(),
+                            peerPublicKey = peerPublicKey,
+                            isReply = true,
+                            serverUrl = repository.getRelayServerUrl()
+                        )
+                    }
                 }
+                return
+            }
+
+            if (type == "PAGE_ACK") {
+                Log.i(TAG, "Received PAGE_ACK from $senderName ($senderTopicId)")
+                // Post acknowledgment notification to user
+                val ackNotification = NotificationCompat.Builder(this, DndHelper.CHANNEL_STATUS_ID)
+                    .setSmallIcon(android.R.drawable.ic_dialog_info)
+                    .setContentTitle("Page Acknowledged ✔")
+                    .setContentText("$senderName confirmed receipt of your page.")
+                    .setPriority(NotificationCompat.PRIORITY_HIGH)
+                    .setAutoCancel(true)
+                    .build()
+                val notificationManager = getSystemService(NOTIFICATION_SERVICE) as android.app.NotificationManager
+                notificationManager.notify((System.currentTimeMillis() % 10000).toInt(), ackNotification)
                 return
             }
 
@@ -215,6 +248,7 @@ class PushListenerService : Service() {
             val serviceIntent = Intent(this, EmergencyPagerService::class.java).apply {
                 action = EmergencyPagerService.ACTION_START_ALARM
                 putExtra("EXTRA_SENDER", senderName)
+                putExtra("EXTRA_SENDER_TOPIC", senderTopicId)
                 putExtra("EXTRA_MESSAGE", decryptedMessage)
                 putExtra("EXTRA_LEVEL", pageLevel.code)
             }
