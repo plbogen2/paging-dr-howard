@@ -31,6 +31,7 @@ class PushListenerService : Service() {
 
     private val sseClient = OkHttpClient.Builder()
         .readTimeout(0, TimeUnit.MILLISECONDS)
+        .pingInterval(30, TimeUnit.SECONDS)
         .retryOnConnectionFailure(true)
         .build()
 
@@ -115,9 +116,9 @@ class PushListenerService : Service() {
             val signature = json.optString("signature", "")
             val pageLevel = PageLevel.fromCode(levelCode)
 
-            // Replay protection: Ignore messages older than 5 minutes or future timestamps > 5 minutes off
+            // Replay protection: Ignore messages older than 10 minutes or future timestamps > 10 minutes off
             val now = System.currentTimeMillis()
-            if (timestamp > 0 && (Math.abs(now - timestamp) > 300_000 || timestamp < serviceStartTimeMs - 60_000)) {
+            if (timestamp > 0 && Math.abs(now - timestamp) > 600_000) {
                 Log.d(TAG, "Ignored stale message from timestamp $timestamp (current: $now)")
                 return
             }
@@ -133,17 +134,19 @@ class PushListenerService : Service() {
                 processedMessageSignatures.clear()
             }
 
-            if (type == "PAIRING_HANDSHAKE") {
-                // Auto-save contact into address book for bidirectional pairing
+            if (type == "PAIRING_HANDSHAKE" || type == "NAME_UPDATE") {
+                // Auto-save or update contact in address book
                 if (senderTopicId.isNotBlank()) {
+                    val existing = repository.getPairedContacts().find { it.topicId == senderTopicId }
                     val contact = PairedContact(
-                        id = senderTopicId,
-                        name = senderName,
+                        id = existing?.id ?: senderTopicId,
+                        name = senderName.ifBlank { existing?.name ?: "Family Member" },
                         topicId = senderTopicId,
-                        publicKeyBase64 = senderPubKeyBase64
+                        publicKeyBase64 = senderPubKeyBase64.ifBlank { existing?.publicKeyBase64 ?: "" },
+                        passphrase = existing?.passphrase ?: ""
                     )
                     repository.savePairedContact(contact)
-                    Log.i(TAG, "Mutual pairing handshake saved contact: $senderName ($senderTopicId)")
+                    Log.i(TAG, "Processed $type for contact: $senderName ($senderTopicId)")
                 }
                 return
             }

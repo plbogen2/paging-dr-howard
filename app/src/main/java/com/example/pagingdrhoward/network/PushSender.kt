@@ -167,4 +167,48 @@ object PushSender {
             }
         })
     }
+
+    /**
+     * Broadcasts a display name change to a paired contact so their local address book updates automatically.
+     */
+    fun sendNameUpdate(
+        targetTopicId: String,
+        newName: String,
+        myTopicId: String,
+        myPublicKeyBase64: String,
+        myPrivateKey: PrivateKey?,
+        peerPublicKey: PublicKey?,
+        onResult: (Boolean) -> Unit = {}
+    ) {
+        val topic = targetTopicId.trim().removePrefix(NTFY_BASE_URL).removePrefix("/")
+        if (topic.isBlank()) return
+
+        val msg = PageMessage(
+            type = "NAME_UPDATE",
+            senderName = newName,
+            senderTopicId = myTopicId,
+            senderPublicKeyBase64 = myPublicKeyBase64,
+            level = PageLevel.HEY_LOOK,
+            messageText = "NAME_UPDATE"
+        )
+
+        val jsonPayload = buildPayloadJson(msg, myPrivateKey, peerPublicKey)
+        val cleanSender = newName.filter { it.code in 32..126 }
+        val request = Request.Builder()
+            .url("$NTFY_BASE_URL$topic")
+            .addHeader("Priority", "2")
+            .addHeader("Title", "Name Update from ${cleanSender.ifBlank { "Family" }}")
+            .addHeader("Content-Type", "application/json")
+            .post(jsonPayload.toRequestBody("application/json; charset=utf-8".toMediaType()))
+            .build()
+
+        client.newCall(request).enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                onResult(false)
+            }
+            override fun onResponse(call: Call, response: Response) {
+                onResult(response.isSuccessful)
+            }
+        })
+    }
 }

@@ -73,12 +73,32 @@ class MainViewModel(private val repository: PagerRepository) : ViewModel() {
     fun updateMyName(name: String) {
         val trimmed = name.trim()
         if (trimmed.isNotBlank()) {
+            val oldName = uiState.myName
             repository.saveMyName(trimmed)
             val pairingCode = PairingPayload.generatePairingCode(trimmed, uiState.myTopicId, uiState.myPublicKeyBase64, uiState.familyPassphrase)
             uiState = uiState.copy(
                 myName = trimmed,
                 myPairingCode = pairingCode
             )
+
+            // Broadcast name change to all existing paired contacts
+            if (oldName != trimmed) {
+                val myPrivateKey = repository.getMyPrivateKey()
+                uiState.pairedContacts.forEach { contact ->
+                    val peerPublicKey = if (contact.publicKeyBase64.isNotBlank()) {
+                        try { CryptoManager.publicKeyFromBase64(contact.publicKeyBase64) } catch (e: Exception) { null }
+                    } else null
+
+                    PushSender.sendNameUpdate(
+                        targetTopicId = contact.topicId,
+                        newName = trimmed,
+                        myTopicId = uiState.myTopicId,
+                        myPublicKeyBase64 = uiState.myPublicKeyBase64,
+                        myPrivateKey = myPrivateKey,
+                        peerPublicKey = peerPublicKey
+                    )
+                }
+            }
         }
     }
 

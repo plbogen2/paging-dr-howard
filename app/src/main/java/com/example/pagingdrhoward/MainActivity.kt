@@ -324,17 +324,17 @@ fun MainPagerApp(
                 if (selectedTab == 0) {
                     FamilyContactsScreen(
                         uiState = uiState,
-                        onImportPairingCode = onImportPairingCode,
                         onDeleteContact = onDeleteContact,
                         onPageContact = onSendPage,
-                        onPasteFromClipboard = onPasteFromClipboard,
-                        onScanQrCode = onScanQrCode,
                         onGoToSetupTab = { selectedTab = 1 }
                     )
                 } else {
                     RecipientSetupScreen(
                         uiState = uiState,
                         onUpdateMyName = onUpdateMyName,
+                        onImportPairingCode = onImportPairingCode,
+                        onPasteFromClipboard = onPasteFromClipboard,
+                        onScanQrCode = onScanQrCode,
                         onGrantDnd = onGrantDnd,
                         onTestAlarm = onTestAlarm,
                         onCopyText = onCopyText,
@@ -349,16 +349,10 @@ fun MainPagerApp(
 @Composable
 fun FamilyContactsScreen(
     uiState: MainUiState,
-    onImportPairingCode: (String) -> Boolean,
     onDeleteContact: (String) -> Unit,
     onPageContact: (PairedContact, PageLevel) -> Unit,
-    onPasteFromClipboard: () -> String?,
-    onScanQrCode: () -> Unit,
     onGoToSetupTab: () -> Unit
 ) {
-    val context = androidx.compose.ui.platform.LocalContext.current
-    var pairingCodeInput by remember { mutableStateOf("") }
-
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -370,80 +364,6 @@ fun FamilyContactsScreen(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // Pair New Family Member Card
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFFF5F5F5))
-        ) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Text("➕ Pair New Family Phone", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                Text("Scan the QR code on your family member's phone, or paste their code below.", fontSize = 12.sp, color = Color.Gray)
-                
-                Spacer(modifier = Modifier.height(12.dp))
-                Button(
-                    onClick = onScanQrCode,
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32))
-                ) {
-                    Icon(Icons.Default.QrCodeScanner, contentDescription = null)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("📷 Scan Pairing QR Code", fontWeight = FontWeight.Bold)
-                }
-
-                Spacer(modifier = Modifier.height(12.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    HorizontalDivider(modifier = Modifier.weight(1f))
-                    Text(" OR ", fontSize = 12.sp, color = Color.Gray, modifier = Modifier.padding(horizontal = 8.dp))
-                    HorizontalDivider(modifier = Modifier.weight(1f))
-                }
-                Spacer(modifier = Modifier.height(12.dp))
-
-                OutlinedTextField(
-                    value = pairingCodeInput,
-                    onValueChange = { pairingCodeInput = it },
-                    label = { Text("Paste Family Pairing Code") },
-                    trailingIcon = {
-                        IconButton(onClick = {
-                            val clip = onPasteFromClipboard()
-                            if (!clip.isNullOrBlank()) {
-                                pairingCodeInput = clip.trim()
-                                Toast.makeText(context, "Pasted from clipboard!", Toast.LENGTH_SHORT).show()
-                            } else {
-                                Toast.makeText(context, "Clipboard is empty.", Toast.LENGTH_SHORT).show()
-                            }
-                        }) {
-                            Icon(Icons.Default.ContentPaste, contentDescription = "Paste from clipboard")
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                OutlinedButton(
-                    onClick = {
-                        val trimmed = pairingCodeInput.trim()
-                        if (trimmed.isBlank()) {
-                            Toast.makeText(context, "Please paste or enter a pairing code first! (From the other phone's Setup tab)", Toast.LENGTH_LONG).show()
-                        } else if (onImportPairingCode(trimmed)) {
-                            pairingCodeInput = ""
-                            Toast.makeText(context, "Device successfully paired!", Toast.LENGTH_SHORT).show()
-                        } else {
-                            Toast.makeText(context, "Invalid pairing code. Make sure to copy the full code from the other device.", Toast.LENGTH_LONG).show()
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Icon(Icons.Default.PersonAdd, contentDescription = null)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Add & Pair via Text Code")
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(24.dp))
-
         Text("Paired Family Members (${uiState.pairedContacts.size})", fontWeight = FontWeight.Bold, fontSize = 18.sp)
         Spacer(modifier = Modifier.height(8.dp))
 
@@ -453,33 +373,18 @@ fun FamilyContactsScreen(
                 colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF8E1))
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    Text("📱 How to Pair with Another Phone:", fontWeight = FontWeight.Bold, color = Color(0xFFF57F17))
+                    Text("📱 No Paired Family Members Yet", fontWeight = FontWeight.Bold, color = Color(0xFFF57F17), fontSize = 16.sp)
                     Spacer(modifier = Modifier.height(6.dp))
-                    Text("1. Install Paging Dr. Howard on the other family member's phone.", fontSize = 13.sp)
-                    Text("2. On their phone, tap 'My Device Setup' tab to display their QR code.", fontSize = 13.sp)
-                    Text("3. Tap '📷 Scan Pairing QR Code' above to link both devices instantly!", fontSize = 13.sp)
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Row(
+                    Text("To link with a family member's phone, go to the Setup tab to scan their QR code or share yours.", fontSize = 13.sp)
+                    Spacer(modifier = Modifier.height(14.dp))
+                    Button(
+                        onClick = onGoToSetupTab,
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE65100))
                     ) {
-                        Button(
-                            onClick = onScanQrCode,
-                            modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32))
-                        ) {
-                            Icon(Icons.Default.QrCodeScanner, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Scan QR", fontSize = 13.sp)
-                        }
-                        OutlinedButton(
-                            onClick = onGoToSetupTab,
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Icon(Icons.Default.QrCode, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("My QR Code", fontSize = 13.sp)
-                        }
+                        Icon(Icons.Default.Settings, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Go to Setup to Pair Devices", fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -542,12 +447,17 @@ fun FamilyContactsScreen(
 fun RecipientSetupScreen(
     uiState: MainUiState,
     onUpdateMyName: (String) -> Unit,
+    onImportPairingCode: (String) -> Boolean,
+    onPasteFromClipboard: () -> String?,
+    onScanQrCode: () -> Unit,
     onGrantDnd: () -> Unit,
     onTestAlarm: () -> Unit,
     onCopyText: (String, String) -> Unit,
     onShareText: (String, String) -> Unit
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     var nameInput by remember(uiState.myName) { mutableStateOf(uiState.myName) }
+    var pairingCodeInput by remember { mutableStateOf("") }
 
     Column(
         modifier = Modifier
@@ -556,7 +466,7 @@ fun RecipientSetupScreen(
             .verticalScroll(rememberScrollState())
     ) {
         Text("Device & Pairing Setup", fontSize = 22.sp, fontWeight = FontWeight.Bold)
-        Text("Configure your name, DND access, and share your pairing code with family.", fontSize = 14.sp, color = Color.Gray)
+        Text("Configure your name, DND access, and pair phones with your family.", fontSize = 14.sp, color = Color.Gray)
 
         Spacer(modifier = Modifier.height(16.dp))
 
@@ -635,6 +545,80 @@ fun RecipientSetupScreen(
             label = { Text("Your Display Name (e.g. Dad or Daughter)") },
             modifier = Modifier.fillMaxWidth()
         )
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // Pair Another Family Phone Card
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFFF1F8E9))
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text("➕ Pair with Another Phone", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color(0xFF2E7D32))
+                Text("Scan the QR code displayed on another phone, or paste their code below.", fontSize = 12.sp, color = Color.DarkGray)
+                
+                Spacer(modifier = Modifier.height(12.dp))
+                Button(
+                    onClick = onScanQrCode,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32))
+                ) {
+                    Icon(Icons.Default.QrCodeScanner, contentDescription = null)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("📷 Scan Family Member's QR Code", fontWeight = FontWeight.Bold)
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    HorizontalDivider(modifier = Modifier.weight(1f))
+                    Text(" OR ", fontSize = 12.sp, color = Color.Gray, modifier = Modifier.padding(horizontal = 8.dp))
+                    HorizontalDivider(modifier = Modifier.weight(1f))
+                }
+                Spacer(modifier = Modifier.height(12.dp))
+
+                OutlinedTextField(
+                    value = pairingCodeInput,
+                    onValueChange = { pairingCodeInput = it },
+                    label = { Text("Paste Family Pairing Code") },
+                    trailingIcon = {
+                        IconButton(onClick = {
+                            val clip = onPasteFromClipboard()
+                            if (!clip.isNullOrBlank()) {
+                                pairingCodeInput = clip.trim()
+                                Toast.makeText(context, "Pasted from clipboard!", Toast.LENGTH_SHORT).show()
+                            } else {
+                                Toast.makeText(context, "Clipboard is empty.", Toast.LENGTH_SHORT).show()
+                            }
+                        }) {
+                            Icon(Icons.Default.ContentPaste, contentDescription = "Paste from clipboard")
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedButton(
+                    onClick = {
+                        val trimmed = pairingCodeInput.trim()
+                        if (trimmed.isBlank()) {
+                            Toast.makeText(context, "Please paste or enter a pairing code first!", Toast.LENGTH_LONG).show()
+                        } else if (onImportPairingCode(trimmed)) {
+                            pairingCodeInput = ""
+                            Toast.makeText(context, "Device successfully paired!", Toast.LENGTH_SHORT).show()
+                        } else {
+                            Toast.makeText(context, "Invalid pairing code. Make sure to copy the full code from the other device.", Toast.LENGTH_LONG).show()
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.PersonAdd, contentDescription = null)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Add & Pair via Text Code")
+                }
+            }
+        }
 
         Spacer(modifier = Modifier.height(24.dp))
 
