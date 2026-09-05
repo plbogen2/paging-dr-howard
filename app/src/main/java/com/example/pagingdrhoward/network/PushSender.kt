@@ -99,10 +99,12 @@ object PushSender {
         val jsonPayload = buildPayloadJson(msg, senderPrivateKey, recipientPublicKey)
         val url = "$NTFY_BASE_URL$topic"
 
+        val cleanTitle = "${pageLevel.name.replace('_', ' ')} from $senderName".filter { it.code in 32..126 }
+
         val request = Request.Builder()
             .url(url)
             .addHeader("Priority", if (pageLevel == PageLevel.SOS) "5" else "4")
-            .addHeader("Title", "${pageLevel.title} from $senderName")
+            .addHeader("Title", cleanTitle.ifBlank { "Emergency Alert" })
             .addHeader("Tags", if (pageLevel == PageLevel.SOS) "rotating_light,sos" else "eyes,bell")
             .addHeader("Content-Type", "application/json")
             .post(jsonPayload.toRequestBody("application/json; charset=utf-8".toMediaType()))
@@ -147,10 +149,11 @@ object PushSender {
         )
 
         val jsonPayload = buildPayloadJson(msg, myPrivateKey, peerPublicKey)
+        val cleanSender = myName.filter { it.code in 32..126 }
         val request = Request.Builder()
             .url("$NTFY_BASE_URL$topic")
             .addHeader("Priority", "3")
-            .addHeader("Title", "Pairing Handshake")
+            .addHeader("Title", "Pairing Handshake from ${cleanSender.ifBlank { "Family" }}")
             .addHeader("Content-Type", "application/json")
             .post(jsonPayload.toRequestBody("application/json; charset=utf-8".toMediaType()))
             .build()

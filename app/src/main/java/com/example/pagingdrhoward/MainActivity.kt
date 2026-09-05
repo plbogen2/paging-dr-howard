@@ -44,6 +44,13 @@ import com.journeyapps.barcodescanner.ScanOptions
 class MainActivity : ComponentActivity() {
 
     private lateinit var viewModel: MainViewModel
+    private val prefListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+        if (key == DefaultPagerRepository.KEY_PAIRED_CONTACTS) {
+            runOnUiThread {
+                viewModel.loadSettings()
+            }
+        }
+    }
 
     private val scanQrLauncher = registerForActivityResult(ScanContract()) { result ->
         if (result.contents != null) {
@@ -74,6 +81,9 @@ class MainActivity : ComponentActivity() {
         val prefs = getSharedPreferences(DefaultPagerRepository.PREF_NAME, MODE_PRIVATE)
         val repository = DefaultPagerRepository(prefs)
         viewModel = MainViewModel(repository)
+
+        // Observe shared preferences for background pairing handshake updates
+        prefs.registerOnSharedPreferenceChangeListener(prefListener)
 
         // Initialize DND channel & start background push listener service
         DndHelper.createEmergencyNotificationChannel(this)
@@ -127,10 +137,17 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         try {
+            viewModel.loadSettings()
             viewModel.setDndGranted(DndHelper.hasDndAccess(this))
         } catch (e: Throwable) {
             viewModel.setDndGranted(false)
         }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        val prefs = getSharedPreferences(DefaultPagerRepository.PREF_NAME, MODE_PRIVATE)
+        prefs.unregisterOnSharedPreferenceChangeListener(prefListener)
     }
 
     private fun startPushListenerService() {
@@ -188,29 +205,34 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun sendRemotePage(contact: PairedContact, pageLevel: PageLevel) {
-        val state = viewModel.uiState
-        val peerPublicKey = if (contact.publicKeyBase64.isNotBlank()) {
-            try { CryptoManager.publicKeyFromBase64(contact.publicKeyBase64) } catch (e: Exception) { null }
-        } else null
+        try {
+            val state = viewModel.uiState
+            val peerPublicKey = if (contact.publicKeyBase64.isNotBlank()) {
+                try { CryptoManager.publicKeyFromBase64(contact.publicKeyBase64) } catch (e: Exception) { null }
+            } else null
 
-        val prefs = getSharedPreferences(DefaultPagerRepository.PREF_NAME, MODE_PRIVATE)
-        val repository = DefaultPagerRepository(prefs)
+            val prefs = getSharedPreferences(DefaultPagerRepository.PREF_NAME, MODE_PRIVATE)
+            val repository = DefaultPagerRepository(prefs)
 
-        PushSender.sendPage(
-            targetTopicId = contact.topicId,
-            senderName = state.myName,
-            senderTopicId = state.myTopicId,
-            senderPublicKeyBase64 = state.myPublicKeyBase64,
-            senderPrivateKey = repository.getMyPrivateKey(),
-            recipientPublicKey = peerPublicKey,
-            pageLevel = pageLevel,
-            messageText = if (pageLevel == PageLevel.HEY_LOOK) "Hey look! Check your phone when free." else "EMERGENCY: Urgent assistance needed!",
-            onResult = { isSuccess, resultMsg ->
-                runOnUiThread {
-                    Toast.makeText(this, resultMsg, Toast.LENGTH_LONG).show()
+            PushSender.sendPage(
+                targetTopicId = contact.topicId,
+                senderName = state.myName,
+                senderTopicId = state.myTopicId,
+                senderPublicKeyBase64 = state.myPublicKeyBase64,
+                senderPrivateKey = repository.getMyPrivateKey(),
+                recipientPublicKey = peerPublicKey,
+                pageLevel = pageLevel,
+                messageText = if (pageLevel == PageLevel.HEY_LOOK) "Hey look! Check your phone when free." else "EMERGENCY: Urgent assistance needed!",
+                onResult = { isSuccess, resultMsg ->
+                    runOnUiThread {
+                        Toast.makeText(this, resultMsg, Toast.LENGTH_LONG).show()
+                    }
                 }
-            }
-        )
+            )
+        } catch (e: Throwable) {
+            android.util.Log.e("MainActivity", "Error sending page", e)
+            Toast.makeText(this, "Failed to send page: ${e.localizedMessage ?: "Unknown error"}", Toast.LENGTH_LONG).show()
+        }
     }
 }
 

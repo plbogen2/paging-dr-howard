@@ -1,5 +1,8 @@
 package com.example.pagingdrhoward.viewmodel
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import com.example.pagingdrhoward.data.PageLevel
 import com.example.pagingdrhoward.data.PairedContact
@@ -28,7 +31,7 @@ data class MainUiState(
 
 class MainViewModel(private val repository: PagerRepository) : ViewModel() {
 
-    var uiState: MainUiState = MainUiState()
+    var uiState: MainUiState by mutableStateOf(MainUiState())
         private set
 
     init {
