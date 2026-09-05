@@ -13,14 +13,14 @@ import java.security.PublicKey
 
 object PushSender {
     private const val TAG = "PushSender"
-    const val DEFAULT_NTFY_BASE_URL = "https://ntfy.sh/"
-    const val NTFY_BASE_URL = "https://ntfy.sh/"
+    const val DEFAULT_NTFY_BASE_URL = "https://ntfy.tedomum.fr/"
+    const val NTFY_BASE_URL = "https://ntfy.tedomum.fr/"
     const val USER_AGENT = "PagingDrHoward/1.0 (Android Emergency Pager; +https://github.com/plbogen2/paging-dr-howard)"
 
     val FALLBACK_SERVERS = listOf(
-        "https://ntfy.sh/",
+        "https://ntfy.tedomum.fr/",
         "https://ntfy.adminforge.de/",
-        "https://ntfy.tedomum.fr/"
+        "https://ntfy.sh/"
     )
 
     private val client = OkHttpClient.Builder()

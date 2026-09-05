@@ -730,12 +730,12 @@ fun RecipientSetupScreen(
                 ) {
                     OutlinedButton(
                         onClick = {
-                            serverInput = "https://ntfy.sh/"
-                            onUpdateRelayServerUrl("https://ntfy.sh/")
+                            serverInput = "https://ntfy.tedomum.fr/"
+                            onUpdateRelayServerUrl("https://ntfy.tedomum.fr/")
                         },
                         modifier = Modifier.weight(1f)
                     ) {
-                        Text("Default (ntfy.sh)", fontSize = 11.sp)
+                        Text("Default (tedomum)", fontSize = 11.sp)
                     }
                     OutlinedButton(
                         onClick = {

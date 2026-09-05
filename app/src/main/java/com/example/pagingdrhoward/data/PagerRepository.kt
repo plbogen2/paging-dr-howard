@@ -142,6 +142,6 @@ class DefaultPagerRepository(private val sharedPreferences: SharedPreferences) :
         const val KEY_FAMILY_PASSPHRASE = "family_passphrase"
         const val KEY_RELAY_SERVER_URL = "relay_server_url"
         const val KEY_PAIRED_CONTACTS = "paired_contacts"
-        const val DEFAULT_RELAY_SERVER_URL = "https://ntfy.sh/"
+        const val DEFAULT_RELAY_SERVER_URL = "https://ntfy.tedomum.fr/"
     }
 }

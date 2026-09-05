@@ -18,7 +18,7 @@ data class MainUiState(
     val myPublicKeyBase64: String = "",
     val myPairingCode: String = "",
     val familyPassphrase: String = "",
-    val relayServerUrl: String = "https://ntfy.sh/",
+    val relayServerUrl: String = "https://ntfy.tedomum.fr/",
     val pairedContacts: List<PairedContact> = emptyList(),
     val isDndAccessGranted: Boolean = false,
     val isListening: Boolean = true,

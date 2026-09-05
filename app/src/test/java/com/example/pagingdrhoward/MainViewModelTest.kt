@@ -19,7 +19,7 @@ class FakePagerRepository : PagerRepository {
     private val keyPair = CryptoManager.generateKeyPair()
     private val contacts = mutableListOf<PairedContact>()
 
-    private var relayServerUrl: String = "https://ntfy.sh"
+    private var relayServerUrl: String = "https://ntfy.tedomum.fr/"
 
     override fun getMyTopicId(): String = topicId
     override fun getMyName(): String = myName
