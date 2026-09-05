@@ -1,21 +1,27 @@
 package com.example.pagingdrhoward.viewmodel
 
 import androidx.lifecycle.ViewModel
+import com.example.pagingdrhoward.data.PageLevel
 import com.example.pagingdrhoward.data.PairedContact
 import com.example.pagingdrhoward.data.PairingPayload
 import com.example.pagingdrhoward.data.PagerRepository
+import com.example.pagingdrhoward.network.PushSender
+import com.example.pagingdrhoward.util.AppUpdateManager
+import com.example.pagingdrhoward.util.CryptoManager
 
 data class MainUiState(
-    val fcmToken: String = "Fetching token...",
-    val isDndAccessGranted: Boolean = false,
+    val myTopicId: String = "",
+    val myName: String = "Dad",
+    val myPublicKeyBase64: String = "",
+    val myPairingCode: String = "",
     val familyPassphrase: String = "",
     val pairedContacts: List<PairedContact> = emptyList(),
-    val myName: String = "Dad",
-    val myPairingCode: String = "",
-    val targetTokenInput: String = "",
-    val senderNameInput: String = "Dad",
-    val messageTextInput: String = "URGENT: Please call me ASAP!",
-    val serverKeyInput: String = "",
+    val isDndAccessGranted: Boolean = false,
+    val isListening: Boolean = true,
+    val selectedContact: PairedContact? = null,
+    val targetTopicInput: String = "",
+    val messageTextInput: String = "URGENT: Please respond ASAP!",
+    val updateInfo: AppUpdateManager.UpdateInfo? = null,
     val errorMessage: String? = null,
     val successMessage: String? = null
 )
@@ -30,21 +36,21 @@ class MainViewModel(private val repository: PagerRepository) : ViewModel() {
     }
 
     fun loadSettings() {
-        val savedToken = repository.getFcmToken() ?: "Fetching token..."
-        val savedPassphrase = repository.getFamilyPassphrase()
+        val topicId = repository.getMyTopicId()
+        val name = repository.getMyName()
+        val pubKey = repository.getMyPublicKeyBase64()
+        val passphrase = repository.getFamilyPassphrase()
         val contacts = repository.getPairedContacts()
-        
-        val pairingCode = if (savedToken != "Fetching token...") {
-            PairingPayload.generatePairingCode(uiState.myName, savedToken, savedPassphrase)
-        } else {
-            ""
-        }
+
+        val pairingCode = PairingPayload.generatePairingCode(name, topicId, pubKey, passphrase)
 
         uiState = uiState.copy(
-            fcmToken = savedToken,
-            familyPassphrase = savedPassphrase,
-            pairedContacts = contacts,
-            myPairingCode = pairingCode
+            myTopicId = topicId,
+            myName = name,
+            myPublicKeyBase64 = pubKey,
+            myPairingCode = pairingCode,
+            familyPassphrase = passphrase,
+            pairedContacts = contacts
         )
     }
 
@@ -52,29 +58,20 @@ class MainViewModel(private val repository: PagerRepository) : ViewModel() {
         uiState = uiState.copy(isDndAccessGranted = granted)
     }
 
-    fun updateFcmToken(token: String) {
-        repository.saveFcmToken(token)
-        val pairingCode = PairingPayload.generatePairingCode(uiState.myName, token, uiState.familyPassphrase)
-        uiState = uiState.copy(
-            fcmToken = token,
-            myPairingCode = pairingCode
-        )
-    }
-
-    fun setTokenError(error: String) {
-        uiState = uiState.copy(
-            fcmToken = error,
-            errorMessage = error
-        )
+    fun setUpdateInfo(updateInfo: AppUpdateManager.UpdateInfo?) {
+        uiState = uiState.copy(updateInfo = updateInfo)
     }
 
     fun updateMyName(name: String) {
-        val pairingCode = PairingPayload.generatePairingCode(name, uiState.fcmToken, uiState.familyPassphrase)
-        uiState = uiState.copy(
-            myName = name,
-            senderNameInput = name,
-            myPairingCode = pairingCode
-        )
+        val trimmed = name.trim()
+        if (trimmed.isNotBlank()) {
+            repository.saveMyName(trimmed)
+            val pairingCode = PairingPayload.generatePairingCode(trimmed, uiState.myTopicId, uiState.myPublicKeyBase64, uiState.familyPassphrase)
+            uiState = uiState.copy(
+                myName = trimmed,
+                myPairingCode = pairingCode
+            )
+        }
     }
 
     fun saveFamilyPassphrase(passphrase: String): Boolean {
@@ -83,7 +80,7 @@ class MainViewModel(private val repository: PagerRepository) : ViewModel() {
             return false
         }
         repository.saveFamilyPassphrase(passphrase)
-        val pairingCode = PairingPayload.generatePairingCode(uiState.myName, uiState.fcmToken, passphrase)
+        val pairingCode = PairingPayload.generatePairingCode(uiState.myName, uiState.myTopicId, uiState.myPublicKeyBase64, passphrase)
         uiState = uiState.copy(
             familyPassphrase = passphrase,
             myPairingCode = pairingCode,
@@ -104,9 +101,24 @@ class MainViewModel(private val repository: PagerRepository) : ViewModel() {
             repository.saveFamilyPassphrase(contact.passphrase)
         }
 
+        // Send silent mutual pairing handshake back to contact's topic
+        val peerPublicKey = if (contact.publicKeyBase64.isNotBlank()) {
+            try { CryptoManager.publicKeyFromBase64(contact.publicKeyBase64) } catch (e: Exception) { null }
+        } else null
+
+        PushSender.sendPairingHandshake(
+            targetTopicId = contact.topicId,
+            myName = uiState.myName,
+            myTopicId = uiState.myTopicId,
+            myPublicKeyBase64 = uiState.myPublicKeyBase64,
+            myPrivateKey = repository.getMyPrivateKey(),
+            peerPublicKey = peerPublicKey
+        )
+
         loadSettings()
         uiState = uiState.copy(
-            targetTokenInput = contact.fcmToken,
+            targetTopicInput = contact.topicId,
+            selectedContact = contact,
             successMessage = "Paired with ${contact.name}! You can now page each other."
         )
         return true
@@ -119,37 +131,17 @@ class MainViewModel(private val repository: PagerRepository) : ViewModel() {
 
     fun selectContactForPage(contact: PairedContact) {
         uiState = uiState.copy(
-            targetTokenInput = contact.fcmToken
+            selectedContact = contact,
+            targetTopicInput = contact.topicId
         )
     }
 
-    fun updateTargetToken(token: String) {
-        uiState = uiState.copy(targetTokenInput = token)
-    }
-
-    fun updateSenderName(name: String) {
-        uiState = uiState.copy(senderNameInput = name)
+    fun updateTargetTopic(topic: String) {
+        uiState = uiState.copy(targetTopicInput = topic)
     }
 
     fun updateMessageText(text: String) {
         uiState = uiState.copy(messageTextInput = text)
-    }
-
-    fun updateServerKey(key: String) {
-        uiState = uiState.copy(serverKeyInput = key)
-    }
-
-    fun validatePageSubmission(): Pair<Boolean, String?> {
-        if (uiState.targetTokenInput.isBlank()) {
-            return Pair(false, "Recipient token is required")
-        }
-        if (uiState.senderNameInput.isBlank()) {
-            return Pair(false, "Sender name is required")
-        }
-        if (uiState.messageTextInput.isBlank()) {
-            return Pair(false, "Message text is required")
-        }
-        return Pair(true, null)
     }
 
     fun clearMessages() {

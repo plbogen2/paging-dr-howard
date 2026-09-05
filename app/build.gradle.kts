@@ -62,12 +62,9 @@ dependencies {
     implementation(libs.androidx.material3)
     implementation(libs.androidx.material.icons.extended)
 
-    // Firebase (FCM)
-    implementation(platform(libs.firebase.bom))
-    implementation(libs.firebase.messaging)
-
-    // OkHttp for direct trigger calls / FCM API
+    // Networking: OkHttp & SSE for real-time encrypted push transport (Zero Firebase / Zero Server)
     implementation(libs.okhttp)
+    implementation("com.squareup.okhttp3:okhttp-sse:4.12.0")
 
     // Unit Testing
     testImplementation("junit:junit:4.13.2")

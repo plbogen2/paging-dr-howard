@@ -8,19 +8,19 @@ import org.junit.Test
 class PairingPayloadTest {
 
     @Test
-    fun `test generate and parse pairing code with ECDSA public key roundtrip`() {
+    fun `test generate and parse pairing code with topicId and ECDSA public key roundtrip`() {
         val name = "Daughter"
-        val token = "fcm_token_daughter_456"
+        val topicId = "pdh_daughter_9876543210abcdef"
         val keyPair = CryptoManager.generateKeyPair()
         val publicKeyBase64 = CryptoManager.publicKeyToBase64(keyPair.public)
 
-        val pairingCode = PairingPayload.generatePairingCode(name, token, publicKeyBase64)
+        val pairingCode = PairingPayload.generatePairingCode(name, topicId, publicKeyBase64)
         assertTrue(pairingCode.startsWith("PAGING_PAIR:"))
 
         val contact = PairingPayload.parsePairingCode(pairingCode)
         assertNotNull(contact)
         assertEquals("Daughter", contact?.name)
-        assertEquals("fcm_token_daughter_456", contact?.fcmToken)
+        assertEquals(topicId, contact?.topicId)
         assertEquals(publicKeyBase64, contact?.publicKeyBase64)
     }
 

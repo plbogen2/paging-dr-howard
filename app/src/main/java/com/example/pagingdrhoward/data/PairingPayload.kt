@@ -6,11 +6,11 @@ import java.util.UUID
 object PairingPayload {
     private const val PREFIX = "PAGING_PAIR:"
 
-    fun generatePairingCode(name: String, fcmToken: String, publicKeyBase64: String, passphrase: String = ""): String {
+    fun generatePairingCode(name: String, topicId: String, publicKeyBase64: String, passphrase: String = ""): String {
         val json = JSONObject().apply {
             put("id", UUID.randomUUID().toString())
             put("name", name)
-            put("token", fcmToken)
+            put("topicId", topicId)
             put("publicKey", publicKeyBase64)
             put("passphrase", passphrase)
         }
@@ -27,10 +27,11 @@ object PairingPayload {
 
         return try {
             val json = JSONObject(jsonStr)
+            val topic = if (json.has("topicId")) json.getString("topicId") else json.getString("token")
             PairedContact(
                 id = json.optString("id", UUID.randomUUID().toString()),
                 name = json.getString("name"),
-                fcmToken = json.getString("token"),
+                topicId = topic,
                 publicKeyBase64 = json.optString("publicKey", ""),
                 passphrase = json.optString("passphrase", "")
             )

@@ -2,7 +2,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- Permissions required to override DND, play alarms, and wake screen -->
+    <!-- Permissions required for DND override, full volume alarms, screen wake, and push listener -->
     <uses-permission android:name="android.permission.ACCESS_NOTIFICATION_POLICY" />
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
@@ -11,7 +11,8 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.INTERNET" />
-    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <application
         android:allowBackup="true"
@@ -24,7 +25,7 @@
         android:theme="@style/Theme.PagingDrHoward"
         tools:targetApi="34">
 
-        <!-- Main Configuration Activity -->
+        <!-- Main Activity -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -36,7 +37,7 @@
             </intent-filter>
         </activity>
 
-        <!-- Emergency Alert Fullscreen Screen (wakes screen over lockscreen) -->
+        <!-- Emergency Alert Fullscreen Activity (wakes screen over lockscreen) -->
         <activity
             android:name=".EmergencyAlertActivity"
             android:exported="false"
@@ -52,14 +53,34 @@
             android:exported="false"
             android:foregroundServiceType="mediaPlayback" />
 
-        <!-- FCM Firebase Push Notification Service -->
+        <!-- Real-Time Push Listener Service (Zero Firebase / Zero Server) -->
         <service
-            android:name=".service.PagerFirebaseMessagingService"
-            android:exported="false">
+            android:name=".service.PushListenerService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback" />
+
+        <!-- Boot Receiver for Auto-Starting Push Listener on Boot/Update -->
+        <receiver
+            android:name=".receiver.BootReceiver"
+            android:enabled="true"
+            android:exported="true">
             <intent-filter>
-                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
-        </service>
+        </receiver>
+
+        <!-- FileProvider for In-App APK Self-Updates -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
 
     </application>
 

@@ -6,7 +6,7 @@ import org.json.JSONObject
 data class PairedContact(
     val id: String,
     val name: String,
-    val fcmToken: String,
+    val topicId: String,
     val publicKeyBase64: String = "",
     val passphrase: String = "",
     val addedAt: Long = System.currentTimeMillis()
@@ -15,7 +15,7 @@ data class PairedContact(
         return JSONObject().apply {
             put("id", id)
             put("name", name)
-            put("fcmToken", fcmToken)
+            put("topicId", topicId)
             put("publicKeyBase64", publicKeyBase64)
             put("passphrase", passphrase)
             put("addedAt", addedAt)
@@ -27,7 +27,7 @@ data class PairedContact(
             return PairedContact(
                 id = json.getString("id"),
                 name = json.getString("name"),
-                fcmToken = json.getString("fcmToken"),
+                topicId = json.optString("topicId", json.optString("fcmToken", "")),
                 publicKeyBase64 = json.optString("publicKeyBase64", ""),
                 passphrase = json.optString("passphrase", ""),
                 addedAt = json.optLong("addedAt", System.currentTimeMillis())

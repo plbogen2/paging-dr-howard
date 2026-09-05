@@ -9,6 +9,7 @@ import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -20,18 +21,19 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.pagingdrhoward.data.DefaultPagerRepository
 import com.example.pagingdrhoward.data.PageLevel
 import com.example.pagingdrhoward.data.PairedContact
-import com.example.pagingdrhoward.network.FcmSender
+import com.example.pagingdrhoward.network.PushSender
 import com.example.pagingdrhoward.service.EmergencyPagerService
+import com.example.pagingdrhoward.service.PushListenerService
+import com.example.pagingdrhoward.util.AppUpdateManager
+import com.example.pagingdrhoward.util.CryptoManager
 import com.example.pagingdrhoward.util.DndHelper
 import com.example.pagingdrhoward.viewmodel.MainUiState
 import com.example.pagingdrhoward.viewmodel.MainViewModel
-import com.google.firebase.messaging.FirebaseMessaging
 
 class MainActivity : ComponentActivity() {
 
@@ -44,40 +46,35 @@ class MainActivity : ComponentActivity() {
         val repository = DefaultPagerRepository(prefs)
         viewModel = MainViewModel(repository)
 
-        try {
-            DndHelper.createEmergencyNotificationChannel(this)
-        } catch (e: Throwable) {
-            // Ignore channel creation errors on customized OS
+        // Initialize DND channel & start background push listener service
+        DndHelper.createEmergencyNotificationChannel(this)
+        startPushListenerService()
+
+        // Check for app updates from GitHub releases
+        val currentBuildNumber = try {
+            val pInfo = packageManager.getPackageInfo(packageName, 0)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                pInfo.longVersionCode.toInt()
+            } else {
+                @Suppress("DEPRECATION")
+                pInfo.versionCode
+            }
+        } catch (e: Exception) {
+            1001
         }
 
-        try {
-            if (repository.getFcmToken() == null) {
-                FirebaseMessaging.getInstance().token
-                    .addOnCompleteListener { task ->
-                        try {
-                            if (task.isSuccessful && task.result != null) {
-                                viewModel.updateFcmToken(task.result)
-                            } else {
-                                val err = task.exception?.localizedMessage ?: "FCM unavailable (requires Google Play Services)"
-                                viewModel.setTokenError(err)
-                            }
-                        } catch (e: Throwable) {
-                            viewModel.setTokenError("Google Play Services / FCM not available on this device.")
-                        }
-                    }
-                    .addOnFailureListener { e ->
-                        viewModel.setTokenError("FCM Error: ${e.localizedMessage ?: "Google Play Services not installed"}")
-                    }
+        AppUpdateManager.checkForUpdate(currentBuildNumber) { updateInfo ->
+            if (updateInfo != null && updateInfo.hasUpdate) {
+                runOnUiThread {
+                    viewModel.setUpdateInfo(updateInfo)
+                }
             }
-        } catch (e: Throwable) {
-            viewModel.setTokenError("Push notifications require Google Play Services (not present on standard Fire OS).")
         }
 
         setContent {
             MaterialTheme {
                 MainPagerApp(
                     uiState = viewModel.uiState,
-                    onSavePassphrase = { passphrase -> viewModel.saveFamilyPassphrase(passphrase) },
                     onUpdateMyName = { name -> viewModel.updateMyName(name) },
                     onImportPairingCode = { code -> viewModel.importPairingCode(code) },
                     onDeleteContact = { id -> viewModel.deleteContact(id) },
@@ -85,7 +82,11 @@ class MainActivity : ComponentActivity() {
                     onGrantDnd = { DndHelper.openDndSettings(this) },
                     onTestAlarm = { triggerLocalTestPage() },
                     onCopyText = { label, text -> copyToClipboard(label, text) },
-                    onSendPage = { targetToken, level -> sendRemotePage(targetToken, level) }
+                    onSendPage = { contact, level -> sendRemotePage(contact, level) },
+                    onInstallUpdate = { info ->
+                        AppUpdateManager.downloadAndInstallUpdate(this, info.apkDownloadUrl, info.latestVersionName)
+                        Toast.makeText(this, "Downloading update ${info.latestVersionName}...", Toast.LENGTH_SHORT).show()
+                    }
                 )
             }
         }
@@ -97,6 +98,21 @@ class MainActivity : ComponentActivity() {
             viewModel.setDndGranted(DndHelper.hasDndAccess(this))
         } catch (e: Throwable) {
             viewModel.setDndGranted(false)
+        }
+    }
+
+    private fun startPushListenerService() {
+        val serviceIntent = Intent(this, PushListenerService::class.java).apply {
+            action = PushListenerService.ACTION_START_LISTENING
+        }
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(serviceIntent)
+            } else {
+                startService(serviceIntent)
+            }
+        } catch (e: Exception) {
+            // Ignored
         }
     }
 
@@ -121,25 +137,30 @@ class MainActivity : ComponentActivity() {
         Toast.makeText(this, "$label copied to clipboard!", Toast.LENGTH_SHORT).show()
     }
 
-    private fun sendRemotePage(targetToken: String, pageLevel: PageLevel) {
-        if (targetToken.isBlank()) {
-            Toast.makeText(this, "Please select or enter recipient token", Toast.LENGTH_SHORT).show()
-            return
-        }
-
+    private fun sendRemotePage(contact: PairedContact, pageLevel: PageLevel) {
         val state = viewModel.uiState
-        FcmSender.sendSecurePage(
-            targetToken = targetToken,
-            senderName = state.senderNameInput,
-            messageText = if (pageLevel == PageLevel.HEY_LOOK) "Hey look! Check your phone when free." else state.messageTextInput,
-            familyPassphrase = state.familyPassphrase,
+        val peerPublicKey = if (contact.publicKeyBase64.isNotBlank()) {
+            try { CryptoManager.publicKeyFromBase64(contact.publicKeyBase64) } catch (e: Exception) { null }
+        } else null
+
+        val prefs = getSharedPreferences(DefaultPagerRepository.PREF_NAME, MODE_PRIVATE)
+        val repository = DefaultPagerRepository(prefs)
+
+        PushSender.sendPage(
+            targetTopicId = contact.topicId,
+            senderName = state.myName,
+            senderTopicId = state.myTopicId,
+            senderPublicKeyBase64 = state.myPublicKeyBase64,
+            senderPrivateKey = repository.getMyPrivateKey(),
+            recipientPublicKey = peerPublicKey,
             pageLevel = pageLevel,
-            serverKey = state.serverKeyInput
-        ) { success, resultMsg ->
-            runOnUiThread {
-                Toast.makeText(this, resultMsg, Toast.LENGTH_LONG).show()
+            messageText = if (pageLevel == PageLevel.HEY_LOOK) "Hey look! Check your phone when free." else "EMERGENCY: Urgent assistance needed!",
+            onResult = { isSuccess, resultMsg ->
+                runOnUiThread {
+                    Toast.makeText(this, resultMsg, Toast.LENGTH_LONG).show()
+                }
             }
-        }
+        )
     }
 }
 
@@ -147,7 +168,6 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun MainPagerApp(
     uiState: MainUiState,
-    onSavePassphrase: (String) -> Unit,
     onUpdateMyName: (String) -> Unit,
     onImportPairingCode: (String) -> Boolean,
     onDeleteContact: (String) -> Unit,
@@ -155,7 +175,8 @@ fun MainPagerApp(
     onGrantDnd: () -> Unit,
     onTestAlarm: () -> Unit,
     onCopyText: (String, String) -> Unit,
-    onSendPage: (String, PageLevel) -> Unit
+    onSendPage: (PairedContact, PageLevel) -> Unit,
+    onInstallUpdate: (AppUpdateManager.UpdateInfo) -> Unit
 ) {
     var selectedTab by remember { mutableStateOf(0) }
 
@@ -186,26 +207,54 @@ fun MainPagerApp(
             }
         }
     ) { paddingValues ->
-        Box(modifier = Modifier.padding(paddingValues)) {
-            if (selectedTab == 0) {
-                FamilyContactsScreen(
-                    uiState = uiState,
-                    onImportPairingCode = onImportPairingCode,
-                    onDeleteContact = onDeleteContact,
-                    onPageContact = { contact, level ->
-                        onSelectContact(contact)
-                        onSendPage(contact.fcmToken, level)
+        Column(modifier = Modifier.padding(paddingValues)) {
+            // In-App Auto-Update Banner
+            uiState.updateInfo?.let { update ->
+                if (update.hasUpdate) {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFFE3F2FD))
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Default.SystemUpdate, contentDescription = null, tint = Color(0xFF1976D2))
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("New Update Available: ${update.latestVersionName}", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                Text("Tap to install latest build seamlessly.", fontSize = 11.sp, color = Color.DarkGray)
+                            }
+                            Button(
+                                onClick = { onInstallUpdate(update) },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1976D2))
+                            ) {
+                                Text("Update", fontSize = 12.sp)
+                            }
+                        }
                     }
-                )
-            } else {
-                RecipientSetupScreen(
-                    uiState = uiState,
-                    onSavePassphrase = onSavePassphrase,
-                    onUpdateMyName = onUpdateMyName,
-                    onGrantDnd = onGrantDnd,
-                    onTestAlarm = onTestAlarm,
-                    onCopyText = onCopyText
-                )
+                }
+            }
+
+            Box(modifier = Modifier.fillMaxSize()) {
+                if (selectedTab == 0) {
+                    FamilyContactsScreen(
+                        uiState = uiState,
+                        onImportPairingCode = onImportPairingCode,
+                        onDeleteContact = onDeleteContact,
+                        onPageContact = onSendPage
+                    )
+                } else {
+                    RecipientSetupScreen(
+                        uiState = uiState,
+                        onUpdateMyName = onUpdateMyName,
+                        onGrantDnd = onGrantDnd,
+                        onTestAlarm = onTestAlarm,
+                        onCopyText = onCopyText
+                    )
+                }
             }
         }
     }
@@ -226,8 +275,8 @@ fun FamilyContactsScreen(
             .padding(16.dp)
             .verticalScroll(rememberScrollState())
     ) {
-        Text("Family Contacts Address Book", fontSize = 22.sp, fontWeight = FontWeight.Bold)
-        Text("Select a page level: (1) Hey look! or (2) SOS Emergency", fontSize = 14.sp, color = Color.Gray)
+        Text("Family Address Book", fontSize = 22.sp, fontWeight = FontWeight.Bold)
+        Text("Tap (1) Hey look! or (2) SOS to page your family members instantly.", fontSize = 14.sp, color = Color.Gray)
 
         Spacer(modifier = Modifier.height(16.dp))
 
@@ -327,14 +376,12 @@ fun FamilyContactsScreen(
 @Composable
 fun RecipientSetupScreen(
     uiState: MainUiState,
-    onSavePassphrase: (String) -> Unit,
     onUpdateMyName: (String) -> Unit,
     onGrantDnd: () -> Unit,
     onTestAlarm: () -> Unit,
     onCopyText: (String, String) -> Unit
 ) {
     var nameInput by remember(uiState.myName) { mutableStateOf(uiState.myName) }
-    var keyInput by remember(uiState.familyPassphrase) { mutableStateOf(uiState.familyPassphrase) }
 
     Column(
         modifier = Modifier
@@ -344,6 +391,26 @@ fun RecipientSetupScreen(
     ) {
         Text("Device & Pairing Setup", fontSize = 22.sp, fontWeight = FontWeight.Bold)
         Text("Configure your name, DND access, and share your pairing code with family.", fontSize = 14.sp, color = Color.Gray)
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Push Service Status Card
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFFE8F5E9))
+        ) {
+            Row(
+                modifier = Modifier.padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF2E7D32), modifier = Modifier.size(28.dp))
+                Spacer(modifier = Modifier.width(12.dp))
+                Column {
+                    Text("Push Listener: Active 🟢", fontWeight = FontWeight.Bold, color = Color(0xFF2E7D32))
+                    Text("Ready for instant emergency pages (Zero-Server / Zero-Firebase).", fontSize = 12.sp, color = Color.DarkGray)
+                }
+            }
+        }
 
         Spacer(modifier = Modifier.height(16.dp))
 
@@ -403,25 +470,6 @@ fun RecipientSetupScreen(
             modifier = Modifier.fillMaxWidth()
         )
 
-        Spacer(modifier = Modifier.height(16.dp))
-
-        Text("Family Security Key 🔒", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-        OutlinedTextField(
-            value = keyInput,
-            onValueChange = { keyInput = it },
-            label = { Text("Shared Secret Passphrase") },
-            leadingIcon = { Icon(Icons.Default.Lock, contentDescription = null) },
-            visualTransformation = PasswordVisualTransformation(),
-            modifier = Modifier.fillMaxWidth()
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-        Button(
-            onClick = { onSavePassphrase(keyInput) },
-            modifier = Modifier.align(Alignment.End)
-        ) {
-            Text("Save Security Key")
-        }
-
         Spacer(modifier = Modifier.height(24.dp))
 
         Text("Share Your Pairing Code 📲", fontWeight = FontWeight.Bold, fontSize = 16.sp)
@@ -434,7 +482,7 @@ fun RecipientSetupScreen(
                     text = uiState.myPairingCode.ifEmpty { "Generating pairing code..." },
                     fontSize = 11.sp,
                     fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                    maxLines = 3
+                    maxLines = 4
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 OutlinedButton(

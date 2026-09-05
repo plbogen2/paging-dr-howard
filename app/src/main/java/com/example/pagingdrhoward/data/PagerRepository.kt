@@ -1,10 +1,18 @@
 package com.example.pagingdrhoward.data
 
 import android.content.SharedPreferences
+import com.example.pagingdrhoward.util.CryptoManager
+import java.security.PrivateKey
+import java.security.PublicKey
+import java.util.UUID
 
 interface PagerRepository {
-    fun getFcmToken(): String?
-    fun saveFcmToken(token: String)
+    fun getMyTopicId(): String
+    fun getMyName(): String
+    fun saveMyName(name: String)
+    fun getMyPublicKeyBase64(): String
+    fun getMyPrivateKey(): PrivateKey?
+    fun getMyPublicKey(): PublicKey?
     fun getFamilyPassphrase(): String
     fun saveFamilyPassphrase(passphrase: String)
     fun getPairedContacts(): List<PairedContact>
@@ -14,12 +22,67 @@ interface PagerRepository {
 
 class DefaultPagerRepository(private val sharedPreferences: SharedPreferences) : PagerRepository {
 
-    override fun getFcmToken(): String? {
-        return sharedPreferences.getString(KEY_FCM_TOKEN, null)
+    override fun getMyTopicId(): String {
+        var topic = sharedPreferences.getString(KEY_MY_TOPIC_ID, null)
+        if (topic.isNullOrBlank()) {
+            topic = "pdh_" + UUID.randomUUID().toString().replace("-", "")
+            sharedPreferences.edit().putString(KEY_MY_TOPIC_ID, topic).apply()
+        }
+        return topic
     }
 
-    override fun saveFcmToken(token: String) {
-        sharedPreferences.edit().putString(KEY_FCM_TOKEN, token).apply()
+    override fun getMyName(): String {
+        return sharedPreferences.getString(KEY_MY_NAME, "Dad") ?: "Dad"
+    }
+
+    override fun saveMyName(name: String) {
+        sharedPreferences.edit().putString(KEY_MY_NAME, name).apply()
+    }
+
+    private fun ensureKeyPair() {
+        val pub = sharedPreferences.getString(KEY_MY_PUBLIC_KEY, null)
+        val priv = sharedPreferences.getString(KEY_MY_PRIVATE_KEY, null)
+        if (pub.isNullOrBlank() || priv.isNullOrBlank()) {
+            val keyPair = CryptoManager.generateKeyPair()
+            val pubBase64 = CryptoManager.publicKeyToBase64(keyPair.public)
+            val privBase64 = CryptoManager.privateKeyToBase64(keyPair.private)
+            sharedPreferences.edit()
+                .putString(KEY_MY_PUBLIC_KEY, pubBase64)
+                .putString(KEY_MY_PRIVATE_KEY, privBase64)
+                .apply()
+        }
+    }
+
+    override fun getMyPublicKeyBase64(): String {
+        ensureKeyPair()
+        return sharedPreferences.getString(KEY_MY_PUBLIC_KEY, "") ?: ""
+    }
+
+    override fun getMyPublicKey(): PublicKey? {
+        val base64 = getMyPublicKeyBase64()
+        return if (base64.isNotBlank()) {
+            try {
+                CryptoManager.publicKeyFromBase64(base64)
+            } catch (e: Exception) {
+                null
+            }
+        } else {
+            null
+        }
+    }
+
+    override fun getMyPrivateKey(): PrivateKey? {
+        ensureKeyPair()
+        val base64 = sharedPreferences.getString(KEY_MY_PRIVATE_KEY, null)
+        return if (!base64.isNullOrBlank()) {
+            try {
+                CryptoManager.privateKeyFromBase64(base64)
+            } catch (e: Exception) {
+                null
+            }
+        } else {
+            null
+        }
     }
 
     override fun getFamilyPassphrase(): String {
@@ -37,8 +100,7 @@ class DefaultPagerRepository(private val sharedPreferences: SharedPreferences) :
 
     override fun savePairedContact(contact: PairedContact) {
         val existing = getPairedContacts().toMutableList()
-        // Replace if contact with same ID or FCM token exists, otherwise append
-        val index = existing.indexOfFirst { it.id == contact.id || it.fcmToken == contact.fcmToken }
+        val index = existing.indexOfFirst { it.id == contact.id || it.topicId == contact.topicId }
         if (index != -1) {
             existing[index] = contact
         } else {
@@ -56,7 +118,10 @@ class DefaultPagerRepository(private val sharedPreferences: SharedPreferences) :
 
     companion object {
         const val PREF_NAME = "pager_prefs"
-        const val KEY_FCM_TOKEN = "fcm_token"
+        const val KEY_MY_TOPIC_ID = "my_topic_id"
+        const val KEY_MY_NAME = "my_name"
+        const val KEY_MY_PUBLIC_KEY = "my_public_key"
+        const val KEY_MY_PRIVATE_KEY = "my_private_key"
         const val KEY_FAMILY_PASSPHRASE = "family_passphrase"
         const val KEY_PAIRED_CONTACTS = "paired_contacts"
     }

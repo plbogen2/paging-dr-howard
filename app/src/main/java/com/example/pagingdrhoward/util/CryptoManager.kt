@@ -9,6 +9,7 @@ import java.security.PrivateKey
 import java.security.PublicKey
 import java.security.Signature
 import java.security.spec.ECGenParameterSpec
+import java.security.spec.PKCS8EncodedKeySpec
 import java.security.spec.X509EncodedKeySpec
 import java.util.Base64
 import javax.crypto.Cipher
@@ -47,6 +48,23 @@ object CryptoManager {
         val keySpec = X509EncodedKeySpec(keyBytes)
         val keyFactory = KeyFactory.getInstance(EC_ALGORITHM)
         return keyFactory.generatePublic(keySpec)
+    }
+
+    /**
+     * Converts a PrivateKey to Base64 PKCS#8 encoded string.
+     */
+    fun privateKeyToBase64(privateKey: PrivateKey): String {
+        return Base64.getEncoder().encodeToString(privateKey.encoded)
+    }
+
+    /**
+     * Restores a PrivateKey object from Base64 PKCS#8 string.
+     */
+    fun privateKeyFromBase64(base64Str: String): PrivateKey {
+        val keyBytes = Base64.getDecoder().decode(base64Str)
+        val keySpec = PKCS8EncodedKeySpec(keyBytes)
+        val keyFactory = KeyFactory.getInstance(EC_ALGORITHM)
+        return keyFactory.generatePrivate(keySpec)
     }
 
     /**
