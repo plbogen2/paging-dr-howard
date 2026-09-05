@@ -750,6 +750,19 @@ fun RecipientSetupScreen(
                     Text("Protocol", fontSize = 12.sp, color = Color.Gray)
                     Text("ntfy.sh + ECDSA P-256", fontSize = 12.sp, color = Color.DarkGray)
                 }
+                Spacer(modifier = Modifier.height(12.dp))
+                val context = androidx.compose.ui.platform.LocalContext.current
+                OutlinedButton(
+                    onClick = {
+                        val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse("https://ntfy.sh/${uiState.myTopicId}"))
+                        context.startActivity(browserIntent)
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.OpenInBrowser, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Open Live Push Web Monitor", fontSize = 12.sp)
+                }
             }
         }
         Spacer(modifier = Modifier.height(16.dp))
