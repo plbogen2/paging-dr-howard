@@ -22,9 +22,22 @@ android {
         }
     }
 
+    signingConfigs {
+        create("release") {
+            storeFile = file("release-keystore.jks")
+            storePassword = "pagingdrhoward"
+            keyAlias = "pagingdrhoward"
+            keyPassword = "pagingdrhoward"
+        }
+    }
+
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("release")
+        }
         release {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("release")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

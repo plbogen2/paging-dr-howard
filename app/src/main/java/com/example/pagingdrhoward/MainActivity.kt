@@ -142,6 +142,7 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         try {
+            startPushListenerService()
             viewModel.loadSettings()
             viewModel.setDndGranted(DndHelper.hasDndAccess(this))
         } catch (e: Throwable) {

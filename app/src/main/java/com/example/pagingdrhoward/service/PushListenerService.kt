@@ -57,8 +57,8 @@ class PushListenerService : Service() {
         val repository = DefaultPagerRepository(prefs)
         val myTopicId = repository.getMyTopicId()
 
-        // Critical: since=now ensures only NEW messages arriving after connection are streamed
-        val sseUrl = "${PushSender.NTFY_BASE_URL}$myTopicId/sse?since=now"
+        // ntfy /sse endpoint automatically streams new events in real time. Do not pass invalid since=now.
+        val sseUrl = "${PushSender.NTFY_BASE_URL}$myTopicId/sse"
         val request = Request.Builder()
             .url(sseUrl)
             .build()
@@ -87,11 +87,17 @@ class PushListenerService : Service() {
             }
 
             override fun onClosed(eventSource: EventSource) {
-                Log.d(TAG, "Push stream closed, reconnecting...")
+                Log.d(TAG, "Push stream closed, reconnecting in 3s...")
+                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                    startSseListener()
+                }, 3000)
             }
 
             override fun onFailure(eventSource: EventSource, t: Throwable?, response: Response?) {
-                Log.w(TAG, "Push stream connection failure: ${t?.localizedMessage}")
+                Log.w(TAG, "Push stream connection failure: ${t?.localizedMessage}, reconnecting in 5s...")
+                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                    startSseListener()
+                }, 5000)
             }
         })
     }
@@ -109,9 +115,9 @@ class PushListenerService : Service() {
             val signature = json.optString("signature", "")
             val pageLevel = PageLevel.fromCode(levelCode)
 
-            // Replay protection: Ignore messages generated before this service started or older than 90 seconds
+            // Replay protection: Ignore messages older than 5 minutes or future timestamps > 5 minutes off
             val now = System.currentTimeMillis()
-            if (timestamp > 0 && (now - timestamp > 90_000 || timestamp < serviceStartTimeMs - 10_000)) {
+            if (timestamp > 0 && (Math.abs(now - timestamp) > 300_000 || timestamp < serviceStartTimeMs - 60_000)) {
                 Log.d(TAG, "Ignored stale message from timestamp $timestamp (current: $now)")
                 return
             }
