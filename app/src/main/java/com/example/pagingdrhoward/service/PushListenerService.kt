@@ -26,6 +26,9 @@ import java.util.concurrent.TimeUnit
 class PushListenerService : Service() {
 
     private var eventSource: EventSource? = null
+    private val processedMessageSignatures = mutableSetOf<String>()
+    private var serviceStartTimeMs = System.currentTimeMillis()
+
     private val sseClient = OkHttpClient.Builder()
         .readTimeout(0, TimeUnit.MILLISECONDS)
         .retryOnConnectionFailure(true)
@@ -35,6 +38,7 @@ class PushListenerService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        serviceStartTimeMs = System.currentTimeMillis()
         DndHelper.createEmergencyNotificationChannel(this)
     }
 
@@ -53,7 +57,8 @@ class PushListenerService : Service() {
         val repository = DefaultPagerRepository(prefs)
         val myTopicId = repository.getMyTopicId()
 
-        val sseUrl = "${PushSender.NTFY_BASE_URL}$myTopicId/sse"
+        // Critical: since=now ensures only NEW messages arriving after connection are streamed
+        val sseUrl = "${PushSender.NTFY_BASE_URL}$myTopicId/sse?since=now"
         val request = Request.Builder()
             .url(sseUrl)
             .build()
@@ -65,10 +70,13 @@ class PushListenerService : Service() {
             }
 
             override fun onEvent(eventSource: EventSource, id: String?, type: String?, data: String) {
-                Log.d(TAG, "Received push event: $data")
+                Log.d(TAG, "Received push event (type=$type): $data")
                 try {
                     val json = JSONObject(data)
-                    // ntfy wraps the posted body in the "message" field of SSE events
+                    val eventType = json.optString("event", "message")
+                    // Ignore open / keepalive events from ntfy.sh
+                    if (eventType != "message") return
+
                     val rawMessage = json.optString("message", "")
                     if (rawMessage.isNotBlank()) {
                         processIncomingPayload(rawMessage, repository)
@@ -96,10 +104,28 @@ class PushListenerService : Service() {
             val senderTopicId = json.optString("senderTopicId", "")
             val senderPubKeyBase64 = json.optString("senderPublicKey", "")
             val levelCode = json.optString("level", PageLevel.SOS.code)
-            val timestamp = json.optLong("timestamp", System.currentTimeMillis())
+            val timestamp = json.optLong("timestamp", 0L)
             val ciphertext = json.optString("ciphertext", "")
             val signature = json.optString("signature", "")
             val pageLevel = PageLevel.fromCode(levelCode)
+
+            // Replay protection: Ignore messages generated before this service started or older than 90 seconds
+            val now = System.currentTimeMillis()
+            if (timestamp > 0 && (now - timestamp > 90_000 || timestamp < serviceStartTimeMs - 10_000)) {
+                Log.d(TAG, "Ignored stale message from timestamp $timestamp (current: $now)")
+                return
+            }
+
+            // Deduplication: Avoid processing identical signature repeatedly
+            val dedupeKey = if (signature.isNotBlank()) signature else "$senderTopicId:$timestamp"
+            if (processedMessageSignatures.contains(dedupeKey)) {
+                Log.d(TAG, "Ignored already processed message dedupeKey: $dedupeKey")
+                return
+            }
+            processedMessageSignatures.add(dedupeKey)
+            if (processedMessageSignatures.size > 200) {
+                processedMessageSignatures.clear()
+            }
 
             if (type == "PAIRING_HANDSHAKE") {
                 // Auto-save contact into address book for bidirectional pairing
@@ -117,7 +143,7 @@ class PushListenerService : Service() {
             }
 
             // Verify ECDSA signature if public key is available
-            var isSignatureValid = true
+            var isSignatureValid = false
             if (senderPubKeyBase64.isNotBlank() && signature.isNotBlank()) {
                 try {
                     val senderPubKey = CryptoManager.publicKeyFromBase64(senderPubKeyBase64)
@@ -129,6 +155,7 @@ class PushListenerService : Service() {
                 }
             }
 
+            // Reject unsigned or invalid incoming pages to prevent false alarms
             if (!isSignatureValid) {
                 Log.w(TAG, "Rejected page: Signature validation failed from $senderName")
                 return

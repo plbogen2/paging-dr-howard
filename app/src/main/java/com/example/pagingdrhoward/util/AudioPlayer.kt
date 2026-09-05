@@ -6,6 +6,8 @@ import android.media.AudioManager
 import android.media.MediaPlayer
 import android.media.RingtoneManager
 import android.net.Uri
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import com.example.pagingdrhoward.data.PageLevel
 
@@ -13,6 +15,9 @@ object AudioPlayer {
     private const val TAG = "AudioPlayer"
     private var mediaPlayer: MediaPlayer? = null
     private var originalVolume: Int = -1
+    private val autoStopHandler = Handler(Looper.getMainLooper())
+    private var autoStopRunnable: Runnable? = null
+    private const val MAX_ALARM_DURATION_MS = 60_000L // Safety timeout: auto-stop after 60 seconds
 
     /**
      * Starts playing emergency alarm audio configured for specific PageLevel.
@@ -48,6 +53,15 @@ object AudioPlayer {
                 start()
             }
             Log.d(TAG, "Audio started for ${level.name} at volume: $targetVolume")
+
+            // Schedule safety auto-stop after 60 seconds so alarm doesn't loop infinitely if unattended
+            autoStopRunnable?.let { autoStopHandler.removeCallbacks(it) }
+            autoStopRunnable = Runnable {
+                Log.d(TAG, "Safety auto-stop timeout reached.")
+                stopEmergencyAlarm(context)
+            }
+            autoStopHandler.postDelayed(autoStopRunnable!!, MAX_ALARM_DURATION_MS)
+
         } catch (e: Exception) {
             Log.e(TAG, "Error starting alarm sound", e)
         }
@@ -58,6 +72,11 @@ object AudioPlayer {
      */
     fun stopEmergencyAlarm(context: Context) {
         try {
+            autoStopRunnable?.let {
+                autoStopHandler.removeCallbacks(it)
+                autoStopRunnable = null
+            }
+
             mediaPlayer?.let { player ->
                 if (player.isPlaying) {
                     player.stop()
