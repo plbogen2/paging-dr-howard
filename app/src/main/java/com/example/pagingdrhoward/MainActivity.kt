@@ -82,6 +82,8 @@ class MainActivity : ComponentActivity() {
                     onGrantDnd = { DndHelper.openDndSettings(this) },
                     onTestAlarm = { triggerLocalTestPage() },
                     onCopyText = { label, text -> copyToClipboard(label, text) },
+                    onPasteFromClipboard = { getClipboardText() },
+                    onShareText = { title, text -> shareText(title, text) },
                     onSendPage = { contact, level -> sendRemotePage(contact, level) },
                     onInstallUpdate = { info ->
                         AppUpdateManager.downloadAndInstallUpdate(this, info.apkDownloadUrl, info.latestVersionName)
@@ -137,6 +139,24 @@ class MainActivity : ComponentActivity() {
         Toast.makeText(this, "$label copied to clipboard!", Toast.LENGTH_SHORT).show()
     }
 
+    private fun getClipboardText(): String? {
+        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        val clip = clipboard.primaryClip
+        if (clip != null && clip.itemCount > 0) {
+            return clip.getItemAt(0).text?.toString()
+        }
+        return null
+    }
+
+    private fun shareText(title: String, text: String) {
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_SUBJECT, title)
+            putExtra(Intent.EXTRA_TEXT, text)
+        }
+        startActivity(Intent.createChooser(intent, title))
+    }
+
     private fun sendRemotePage(contact: PairedContact, pageLevel: PageLevel) {
         val state = viewModel.uiState
         val peerPublicKey = if (contact.publicKeyBase64.isNotBlank()) {
@@ -175,6 +195,8 @@ fun MainPagerApp(
     onGrantDnd: () -> Unit,
     onTestAlarm: () -> Unit,
     onCopyText: (String, String) -> Unit,
+    onPasteFromClipboard: () -> String?,
+    onShareText: (String, String) -> Unit,
     onSendPage: (PairedContact, PageLevel) -> Unit,
     onInstallUpdate: (AppUpdateManager.UpdateInfo) -> Unit
 ) {
@@ -244,7 +266,9 @@ fun MainPagerApp(
                         uiState = uiState,
                         onImportPairingCode = onImportPairingCode,
                         onDeleteContact = onDeleteContact,
-                        onPageContact = onSendPage
+                        onPageContact = onSendPage,
+                        onPasteFromClipboard = onPasteFromClipboard,
+                        onGoToSetupTab = { selectedTab = 1 }
                     )
                 } else {
                     RecipientSetupScreen(
@@ -252,7 +276,8 @@ fun MainPagerApp(
                         onUpdateMyName = onUpdateMyName,
                         onGrantDnd = onGrantDnd,
                         onTestAlarm = onTestAlarm,
-                        onCopyText = onCopyText
+                        onCopyText = onCopyText,
+                        onShareText = onShareText
                     )
                 }
             }
@@ -265,8 +290,11 @@ fun FamilyContactsScreen(
     uiState: MainUiState,
     onImportPairingCode: (String) -> Boolean,
     onDeleteContact: (String) -> Unit,
-    onPageContact: (PairedContact, PageLevel) -> Unit
+    onPageContact: (PairedContact, PageLevel) -> Unit,
+    onPasteFromClipboard: () -> String?,
+    onGoToSetupTab: () -> Unit
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     var pairingCodeInput by remember { mutableStateOf("") }
 
     Column(
@@ -287,19 +315,38 @@ fun FamilyContactsScreen(
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Text("➕ Pair New Family Phone", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                Text("Paste your family member's Pairing Code to add them bidirectionally.", fontSize = 12.sp, color = Color.Gray)
+                Text("Paste your family member's Pairing Code from their device.", fontSize = 12.sp, color = Color.Gray)
                 Spacer(modifier = Modifier.height(8.dp))
                 OutlinedTextField(
                     value = pairingCodeInput,
                     onValueChange = { pairingCodeInput = it },
                     label = { Text("Paste Family Pairing Code") },
+                    trailingIcon = {
+                        IconButton(onClick = {
+                            val clip = onPasteFromClipboard()
+                            if (!clip.isNullOrBlank()) {
+                                pairingCodeInput = clip.trim()
+                                Toast.makeText(context, "Pasted from clipboard!", Toast.LENGTH_SHORT).show()
+                            } else {
+                                Toast.makeText(context, "Clipboard is empty.", Toast.LENGTH_SHORT).show()
+                            }
+                        }) {
+                            Icon(Icons.Default.ContentPaste, contentDescription = "Paste from clipboard")
+                        }
+                    },
                     modifier = Modifier.fillMaxWidth()
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 Button(
                     onClick = {
-                        if (onImportPairingCode(pairingCodeInput)) {
+                        val trimmed = pairingCodeInput.trim()
+                        if (trimmed.isBlank()) {
+                            Toast.makeText(context, "Please paste or enter a pairing code first! (From the other phone's Setup tab)", Toast.LENGTH_LONG).show()
+                        } else if (onImportPairingCode(trimmed)) {
                             pairingCodeInput = ""
+                            Toast.makeText(context, "Device successfully paired!", Toast.LENGTH_SHORT).show()
+                        } else {
+                            Toast.makeText(context, "Invalid pairing code. Make sure to copy the full code from the other device.", Toast.LENGTH_LONG).show()
                         }
                     },
                     modifier = Modifier.fillMaxWidth()
@@ -317,7 +364,27 @@ fun FamilyContactsScreen(
         Spacer(modifier = Modifier.height(8.dp))
 
         if (uiState.pairedContacts.isEmpty()) {
-            Text("No family contacts added yet. Add a phone above or share your pairing code in setup!", color = Color.Gray, fontSize = 14.sp)
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF8E1))
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text("📱 How to Pair with Another Phone:", fontWeight = FontWeight.Bold, color = Color(0xFFF57F17))
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text("1. Install Paging Dr. Howard on the other family member's phone.", fontSize = 13.sp)
+                    Text("2. On their phone, tap 'My Device Setup' tab and tap 'Copy Pairing Code'.", fontSize = 13.sp)
+                    Text("3. Paste that code into the box above and tap 'Add & Pair Phone'.", fontSize = 13.sp)
+                    Spacer(modifier = Modifier.height(12.dp))
+                    OutlinedButton(
+                        onClick = onGoToSetupTab,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.QrCode, contentDescription = null)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("View My Own Pairing Code")
+                    }
+                }
+            }
         } else {
             uiState.pairedContacts.forEach { contact ->
                 Card(
@@ -379,7 +446,8 @@ fun RecipientSetupScreen(
     onUpdateMyName: (String) -> Unit,
     onGrantDnd: () -> Unit,
     onTestAlarm: () -> Unit,
-    onCopyText: (String, String) -> Unit
+    onCopyText: (String, String) -> Unit,
+    onShareText: (String, String) -> Unit
 ) {
     var nameInput by remember(uiState.myName) { mutableStateOf(uiState.myName) }
 
@@ -484,14 +552,27 @@ fun RecipientSetupScreen(
                     fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
                     maxLines = 4
                 )
-                Spacer(modifier = Modifier.height(8.dp))
-                OutlinedButton(
-                    onClick = { onCopyText("Pairing Code", uiState.myPairingCode) },
-                    modifier = Modifier.align(Alignment.End)
+                Spacer(modifier = Modifier.height(12.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
+                    OutlinedButton(
+                        onClick = { onShareText("Paging Dr. Howard Pairing Code", uiState.myPairingCode) }
+                    ) {
+                        Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Share")
+                    }
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Copy Pairing Code")
+                    Button(
+                        onClick = { onCopyText("Pairing Code", uiState.myPairingCode) }
+                    ) {
+                        Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Copy Code")
+                    }
                 }
             }
         }
