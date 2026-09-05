@@ -66,6 +66,10 @@ dependencies {
     implementation(libs.okhttp)
     implementation("com.squareup.okhttp3:okhttp-sse:4.12.0")
 
+    // QR Code Generation & Scanning (Zero Play Services dependency)
+    implementation("com.google.zxing:core:3.5.3")
+    implementation("com.journeyapps:zxing-android-embedded:4.3.0")
+
     // Unit Testing
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")

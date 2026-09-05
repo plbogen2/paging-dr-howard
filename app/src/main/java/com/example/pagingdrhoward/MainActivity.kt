@@ -9,9 +9,11 @@ import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -20,6 +22,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -32,12 +35,38 @@ import com.example.pagingdrhoward.service.PushListenerService
 import com.example.pagingdrhoward.util.AppUpdateManager
 import com.example.pagingdrhoward.util.CryptoManager
 import com.example.pagingdrhoward.util.DndHelper
+import com.example.pagingdrhoward.util.QrCodeGenerator
 import com.example.pagingdrhoward.viewmodel.MainUiState
 import com.example.pagingdrhoward.viewmodel.MainViewModel
+import com.journeyapps.barcodescanner.ScanContract
+import com.journeyapps.barcodescanner.ScanOptions
 
 class MainActivity : ComponentActivity() {
 
     private lateinit var viewModel: MainViewModel
+
+    private val scanQrLauncher = registerForActivityResult(ScanContract()) { result ->
+        if (result.contents != null) {
+            val code = result.contents.trim()
+            if (viewModel.importPairingCode(code)) {
+                Toast.makeText(this, "Device paired successfully!", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(this, "Invalid pairing QR code. Please ensure it's from Paging Dr. Howard.", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    private fun launchQrScanner() {
+        val options = ScanOptions().apply {
+            setDesiredBarcodeFormats(ScanOptions.QR_CODE)
+            setPrompt("Point camera at the pairing QR code on the other device")
+            setCameraId(0)
+            setBeepEnabled(true)
+            setBarcodeImageEnabled(false)
+            setOrientationLocked(false)
+        }
+        scanQrLauncher.launch(options)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -84,6 +113,7 @@ class MainActivity : ComponentActivity() {
                     onCopyText = { label, text -> copyToClipboard(label, text) },
                     onPasteFromClipboard = { getClipboardText() },
                     onShareText = { title, text -> shareText(title, text) },
+                    onScanQrCode = { launchQrScanner() },
                     onSendPage = { contact, level -> sendRemotePage(contact, level) },
                     onInstallUpdate = { info ->
                         AppUpdateManager.downloadAndInstallUpdate(this, info.apkDownloadUrl, info.latestVersionName)
@@ -197,6 +227,7 @@ fun MainPagerApp(
     onCopyText: (String, String) -> Unit,
     onPasteFromClipboard: () -> String?,
     onShareText: (String, String) -> Unit,
+    onScanQrCode: () -> Unit,
     onSendPage: (PairedContact, PageLevel) -> Unit,
     onInstallUpdate: (AppUpdateManager.UpdateInfo) -> Unit
 ) {
@@ -268,6 +299,7 @@ fun MainPagerApp(
                         onDeleteContact = onDeleteContact,
                         onPageContact = onSendPage,
                         onPasteFromClipboard = onPasteFromClipboard,
+                        onScanQrCode = onScanQrCode,
                         onGoToSetupTab = { selectedTab = 1 }
                     )
                 } else {
@@ -292,6 +324,7 @@ fun FamilyContactsScreen(
     onDeleteContact: (String) -> Unit,
     onPageContact: (PairedContact, PageLevel) -> Unit,
     onPasteFromClipboard: () -> String?,
+    onScanQrCode: () -> Unit,
     onGoToSetupTab: () -> Unit
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -315,8 +348,30 @@ fun FamilyContactsScreen(
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Text("➕ Pair New Family Phone", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                Text("Paste your family member's Pairing Code from their device.", fontSize = 12.sp, color = Color.Gray)
-                Spacer(modifier = Modifier.height(8.dp))
+                Text("Scan the QR code on your family member's phone, or paste their code below.", fontSize = 12.sp, color = Color.Gray)
+                
+                Spacer(modifier = Modifier.height(12.dp))
+                Button(
+                    onClick = onScanQrCode,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32))
+                ) {
+                    Icon(Icons.Default.QrCodeScanner, contentDescription = null)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("📷 Scan Pairing QR Code", fontWeight = FontWeight.Bold)
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    HorizontalDivider(modifier = Modifier.weight(1f))
+                    Text(" OR ", fontSize = 12.sp, color = Color.Gray, modifier = Modifier.padding(horizontal = 8.dp))
+                    HorizontalDivider(modifier = Modifier.weight(1f))
+                }
+                Spacer(modifier = Modifier.height(12.dp))
+
                 OutlinedTextField(
                     value = pairingCodeInput,
                     onValueChange = { pairingCodeInput = it },
@@ -337,7 +392,7 @@ fun FamilyContactsScreen(
                     modifier = Modifier.fillMaxWidth()
                 )
                 Spacer(modifier = Modifier.height(8.dp))
-                Button(
+                OutlinedButton(
                     onClick = {
                         val trimmed = pairingCodeInput.trim()
                         if (trimmed.isBlank()) {
@@ -353,7 +408,7 @@ fun FamilyContactsScreen(
                 ) {
                     Icon(Icons.Default.PersonAdd, contentDescription = null)
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Add & Pair Phone")
+                    Text("Add & Pair via Text Code")
                 }
             }
         }
@@ -372,16 +427,30 @@ fun FamilyContactsScreen(
                     Text("📱 How to Pair with Another Phone:", fontWeight = FontWeight.Bold, color = Color(0xFFF57F17))
                     Spacer(modifier = Modifier.height(6.dp))
                     Text("1. Install Paging Dr. Howard on the other family member's phone.", fontSize = 13.sp)
-                    Text("2. On their phone, tap 'My Device Setup' tab and tap 'Copy Pairing Code'.", fontSize = 13.sp)
-                    Text("3. Paste that code into the box above and tap 'Add & Pair Phone'.", fontSize = 13.sp)
+                    Text("2. On their phone, tap 'My Device Setup' tab to display their QR code.", fontSize = 13.sp)
+                    Text("3. Tap '📷 Scan Pairing QR Code' above to link both devices instantly!", fontSize = 13.sp)
                     Spacer(modifier = Modifier.height(12.dp))
-                    OutlinedButton(
-                        onClick = onGoToSetupTab,
-                        modifier = Modifier.fillMaxWidth()
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Icon(Icons.Default.QrCode, contentDescription = null)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("View My Own Pairing Code")
+                        Button(
+                            onClick = onScanQrCode,
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32))
+                        ) {
+                            Icon(Icons.Default.QrCodeScanner, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Scan QR", fontSize = 13.sp)
+                        }
+                        OutlinedButton(
+                            onClick = onGoToSetupTab,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(Icons.Default.QrCode, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("My QR Code", fontSize = 13.sp)
+                        }
                     }
                 }
             }
@@ -540,30 +609,47 @@ fun RecipientSetupScreen(
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        Text("Share Your Pairing Code 📲", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-        Text("Send this code to your family member so they can add your phone bidirectionally.", fontSize = 12.sp, color = Color.Gray)
+        Text("Your Device Pairing QR Code 📲", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+        Text("Hold this screen up so another phone can scan it with their camera.", fontSize = 12.sp, color = Color.Gray)
         Spacer(modifier = Modifier.height(8.dp))
 
-        Card(modifier = Modifier.fillMaxWidth()) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Text(
-                    text = uiState.myPairingCode.ifEmpty { "Generating pairing code..." },
-                    fontSize = 11.sp,
-                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                    maxLines = 4
-                )
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = Color.White)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                val qrBitmap = remember(uiState.myPairingCode) {
+                    if (uiState.myPairingCode.isNotBlank()) {
+                        QrCodeGenerator.generateQrBitmap(uiState.myPairingCode, 512)?.asImageBitmap()
+                    } else null
+                }
+
+                qrBitmap?.let { bitmap ->
+                    Image(
+                        bitmap = bitmap,
+                        contentDescription = "My Pairing QR Code",
+                        modifier = Modifier
+                            .size(200.dp)
+                            .background(Color.White, RoundedCornerShape(8.dp))
+                    )
+                } ?: Text("Generating QR Code...", fontSize = 12.sp, color = Color.Gray)
+
                 Spacer(modifier = Modifier.height(12.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End,
-                    verticalAlignment = Alignment.CenterVertically
+                    horizontalArrangement = Arrangement.Center
                 ) {
                     OutlinedButton(
                         onClick = { onShareText("Paging Dr. Howard Pairing Code", uiState.myPairingCode) }
                     ) {
                         Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Share")
+                        Text("Share Code")
                     }
                     Spacer(modifier = Modifier.width(8.dp))
                     Button(
