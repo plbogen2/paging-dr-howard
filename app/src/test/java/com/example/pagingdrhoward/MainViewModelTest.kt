@@ -19,9 +19,13 @@ class FakePagerRepository : PagerRepository {
     private val keyPair = CryptoManager.generateKeyPair()
     private val contacts = mutableListOf<PairedContact>()
 
+    private var relayServerUrl: String = "https://ntfy.sh"
+
     override fun getMyTopicId(): String = topicId
     override fun getMyName(): String = myName
     override fun saveMyName(name: String) { this.myName = name }
+    override fun getRelayServerUrl(): String = relayServerUrl
+    override fun saveRelayServerUrl(url: String) { this.relayServerUrl = url }
     override fun getMyPublicKeyBase64(): String = CryptoManager.publicKeyToBase64(keyPair.public)
     override fun getMyPrivateKey(): PrivateKey? = keyPair.private
     override fun getMyPublicKey(): PublicKey? = keyPair.public
