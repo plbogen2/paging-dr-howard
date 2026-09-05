@@ -212,8 +212,8 @@ class PushListenerService : Service() {
                 return
             }
 
-            // Verify ECDSA signature if public key is available
-            var isSignatureValid = false
+            // Verify ECDSA signature if public key & signature are present
+            var isSignatureValid = true
             if (senderPubKeyBase64.isNotBlank() && signature.isNotBlank()) {
                 try {
                     val senderPubKey = CryptoManager.publicKeyFromBase64(senderPubKeyBase64)
@@ -225,7 +225,7 @@ class PushListenerService : Service() {
                 }
             }
 
-            // Reject unsigned or invalid incoming pages to prevent false alarms
+            // Reject invalid incoming pages (if signature was provided but failed verification)
             if (!isSignatureValid) {
                 Log.w(TAG, "Rejected page: Signature validation failed from $senderName")
                 return

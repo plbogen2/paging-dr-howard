@@ -4,6 +4,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import com.example.pagingdrhoward.data.PageLevel
 import com.example.pagingdrhoward.data.PairedContact
 import com.example.pagingdrhoward.data.PairingPayload
@@ -27,6 +31,7 @@ data class MainUiState(
     val messageTextInput: String = "URGENT: Please respond ASAP!",
     val updateInfo: AppUpdateManager.UpdateInfo? = null,
     val appVersion: String = "1.0.0",
+    val cooldowns: Map<String, Int> = emptyMap(),
     val errorMessage: String? = null,
     val successMessage: String? = null
 )
@@ -186,6 +191,25 @@ class MainViewModel(private val repository: PagerRepository) : ViewModel() {
 
     fun updateMessageText(text: String) {
         uiState = uiState.copy(messageTextInput = text)
+    }
+
+    fun startCooldown(topicId: String, durationSeconds: Int = 10) {
+        val currentMap = uiState.cooldowns.toMutableMap()
+        currentMap[topicId] = durationSeconds
+        uiState = uiState.copy(cooldowns = currentMap)
+
+        androidx.lifecycle.viewModelScope.launch(kotlinx.coroutines.Dispatchers.Main) {
+            for (sec in (durationSeconds - 1) downTo 0) {
+                kotlinx.coroutines.delay(1000)
+                val updated = uiState.cooldowns.toMutableMap()
+                if (sec > 0) {
+                    updated[topicId] = sec
+                } else {
+                    updated.remove(topicId)
+                }
+                uiState = uiState.copy(cooldowns = updated)
+            }
+        }
     }
 
     fun clearMessages() {

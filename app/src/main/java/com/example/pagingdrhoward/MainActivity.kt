@@ -227,6 +227,8 @@ class MainActivity : ComponentActivity() {
 
             val targetServer = contact.relayServerUrl.ifBlank { repository.getRelayServerUrl() }
 
+            viewModel.startCooldown(contact.topicId, 10)
+
             PushSender.sendPage(
                 targetTopicId = contact.topicId,
                 senderName = state.myName,
@@ -419,6 +421,9 @@ fun FamilyContactsScreen(
 
                         Spacer(modifier = Modifier.height(12.dp))
 
+                        val cooldown = uiState.cooldowns[contact.topicId] ?: 0
+                        val isCoolingDown = cooldown > 0
+
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -426,23 +431,31 @@ fun FamilyContactsScreen(
                             // Level 1: Hey look!
                             Button(
                                 onClick = { onPageContact(contact, PageLevel.HEY_LOOK) },
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(PageLevel.HEY_LOOK.colorHex)),
+                                enabled = !isCoolingDown,
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = Color(PageLevel.HEY_LOOK.colorHex),
+                                    disabledContainerColor = Color.LightGray
+                                ),
                                 modifier = Modifier.weight(1f)
                             ) {
                                 Icon(Icons.Default.Visibility, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text("Hey Look!", fontSize = 13.sp)
+                                Text(if (isCoolingDown) "Wait (${cooldown}s)" else "Hey Look!", fontSize = 13.sp)
                             }
 
                             // Level 2: SOS
                             Button(
                                 onClick = { onPageContact(contact, PageLevel.SOS) },
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(PageLevel.SOS.colorHex)),
+                                enabled = !isCoolingDown,
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = Color(PageLevel.SOS.colorHex),
+                                    disabledContainerColor = Color.LightGray
+                                ),
                                 modifier = Modifier.weight(1f)
                             ) {
                                 Icon(Icons.Default.NotificationsActive, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text("SOS", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                Text(if (isCoolingDown) "Wait (${cooldown}s)" else "SOS", fontSize = 13.sp, fontWeight = FontWeight.Bold)
                             }
                         }
                     }
@@ -783,10 +796,22 @@ fun RecipientSetupScreen(
                 Spacer(modifier = Modifier.height(8.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text("Device Topic ID", fontSize = 12.sp, color = Color.Gray)
-                    Text(uiState.myTopicId.take(16) + "...", fontSize = 12.sp, color = Color.DarkGray)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(uiState.myTopicId.take(16) + "...", fontSize = 12.sp, color = Color.DarkGray)
+                        Spacer(modifier = Modifier.width(4.dp))
+                        IconButton(
+                            onClick = { onCopyText("Device Topic ID", uiState.myTopicId) },
+                            modifier = Modifier.size(24.dp)
+                        ) {
+                            Icon(Icons.Default.ContentCopy, contentDescription = "Copy Topic ID", modifier = Modifier.size(14.dp), tint = Color(0xFFD32F2F))
+                        }
+                    }
                 }
                 Spacer(modifier = Modifier.height(4.dp))
                 Row(
