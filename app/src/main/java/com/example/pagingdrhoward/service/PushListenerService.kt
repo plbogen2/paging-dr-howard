@@ -29,6 +29,7 @@ class PushListenerService : Service() {
     private val processedMessageSignatures = mutableSetOf<String>()
     private var reconnectAttempt = 0
     private var currentServerIndex = 0
+    private var serviceStartTimeMs = System.currentTimeMillis()
 
     private val sseClient = OkHttpClient.Builder()
         .readTimeout(0, TimeUnit.MILLISECONDS)

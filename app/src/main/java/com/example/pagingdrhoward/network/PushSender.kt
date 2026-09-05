@@ -122,15 +122,12 @@ object PushSender {
             if (!serverCandidates.contains(fb)) serverCandidates.add(fb)
         }
 
-        fun trySendCandidate(candidateIndex: Int) {
-            if (candidateIndex >= serverCandidates.size) {
-                onResult(false, "Network error: Unable to reach any push relays. Please check internet connection.")
-                return
-            }
+        val completedCount = java.util.concurrent.atomic.AtomicInteger(0)
+        val hasSucceeded = java.util.concurrent.atomic.AtomicBoolean(false)
+        val totalServers = serverCandidates.size
 
-            val currentBase = serverCandidates[candidateIndex]
-            val url = "$currentBase$topic"
-
+        serverCandidates.forEach { base ->
+            val url = "$base$topic"
             val request = Request.Builder()
                 .url(url)
                 .addHeader("User-Agent", USER_AGENT)
@@ -143,27 +140,27 @@ object PushSender {
 
             client.newCall(request).enqueue(object : Callback {
                 override fun onFailure(call: Call, e: IOException) {
-                    Log.w(TAG, "Push dispatch failed on $currentBase: ${e.localizedMessage}. Attempting failover...")
-                    trySendCandidate(candidateIndex + 1)
+                    Log.w(TAG, "Push dispatch failed on $base: ${e.localizedMessage}")
+                    if (completedCount.incrementAndGet() == totalServers && !hasSucceeded.get()) {
+                        onResult(false, "Network error: Unable to reach any push relays. Please check internet connection.")
+                    }
                 }
 
                 override fun onResponse(call: Call, response: Response) {
                     if (response.isSuccessful) {
-                        Log.d(TAG, "Page successfully sent via $currentBase (code: ${response.code})")
-                        onResult(true, "${pageLevel.title} sent successfully!")
-                    } else if (response.code == 429) {
-                        val retryAfter = response.header("Retry-After") ?: "a few moments"
-                        Log.w(TAG, "Rate limited (429) on $currentBase, retry after: $retryAfter")
-                        trySendCandidate(candidateIndex + 1)
+                        Log.d(TAG, "Page successfully sent via $base (code: ${response.code})")
+                        if (hasSucceeded.compareAndSet(false, true)) {
+                            onResult(true, "${pageLevel.title} sent successfully!")
+                        }
                     } else {
-                        Log.w(TAG, "Server returned error ${response.code} on $currentBase")
-                        trySendCandidate(candidateIndex + 1)
+                        Log.w(TAG, "Server $base returned error code ${response.code}")
+                    }
+                    if (completedCount.incrementAndGet() == totalServers && !hasSucceeded.get()) {
+                        onResult(false, "Error delivering page across push relays.")
                     }
                 }
             })
         }
-
-        trySendCandidate(0)
     }
 
     /**
