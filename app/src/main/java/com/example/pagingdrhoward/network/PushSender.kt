@@ -115,52 +115,31 @@ object PushSender {
         val jsonPayload = buildPayloadJson(msg, senderPrivateKey, recipientPublicKey)
         val cleanTitle = "${pageLevel.name.replace('_', ' ')} from $senderName".filter { it.code in 32..126 }
 
-        val serverCandidates = mutableListOf<String>()
-        val primary = if (serverUrl.isNotBlank()) (if (serverUrl.endsWith("/")) serverUrl else "$serverUrl/") else DEFAULT_NTFY_BASE_URL
-        serverCandidates.add(primary)
-        FALLBACK_SERVERS.forEach { fb ->
-            if (!serverCandidates.contains(fb)) serverCandidates.add(fb)
-        }
+        val targetBase = if (serverUrl.isNotBlank()) (if (serverUrl.endsWith("/")) serverUrl else "$serverUrl/") else DEFAULT_NTFY_BASE_URL
+        val url = "$targetBase$topic"
+        val request = Request.Builder()
+            .url(url)
+            .addHeader("User-Agent", USER_AGENT)
+            .addHeader("Priority", if (pageLevel == PageLevel.SOS) "5" else "4")
+            .addHeader("Title", cleanTitle.ifBlank { "Emergency Alert" })
+            .addHeader("Tags", if (pageLevel == PageLevel.SOS) "rotating_light,sos" else "eyes,bell")
+            .addHeader("Content-Type", "application/json")
+            .post(jsonPayload.toRequestBody("application/json; charset=utf-8".toMediaType()))
+            .build()
 
-        val completedCount = java.util.concurrent.atomic.AtomicInteger(0)
-        val hasSucceeded = java.util.concurrent.atomic.AtomicBoolean(false)
-        val totalServers = serverCandidates.size
-
-        serverCandidates.forEach { base ->
-            val url = "$base$topic"
-            val request = Request.Builder()
-                .url(url)
-                .addHeader("User-Agent", USER_AGENT)
-                .addHeader("Priority", if (pageLevel == PageLevel.SOS) "5" else "4")
-                .addHeader("Title", cleanTitle.ifBlank { "Emergency Alert" })
-                .addHeader("Tags", if (pageLevel == PageLevel.SOS) "rotating_light,sos" else "eyes,bell")
-                .addHeader("Content-Type", "application/json")
-                .post(jsonPayload.toRequestBody("application/json; charset=utf-8".toMediaType()))
-                .build()
-
-            client.newCall(request).enqueue(object : Callback {
-                override fun onFailure(call: Call, e: IOException) {
-                    Log.w(TAG, "Push dispatch failed on $base: ${e.localizedMessage}")
-                    if (completedCount.incrementAndGet() == totalServers && !hasSucceeded.get()) {
-                        onResult(false, "Network error: Unable to reach any push relays. Please check internet connection.")
-                    }
+        client.newCall(request).enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                Log.w(TAG, "Push dispatch failed on $targetBase: ${e.localizedMessage}")
+                onResult(false, "Network error: Unable to reach relay server ($targetBase).")
+            }
+            override fun onResponse(call: Call, response: Response) {
+                if (response.isSuccessful) {
+                    onResult(true, "${pageLevel.title} sent successfully!")
+                } else {
+                    onResult(false, "Server returned error: HTTP ${response.code}")
                 }
-
-                override fun onResponse(call: Call, response: Response) {
-                    if (response.isSuccessful) {
-                        Log.d(TAG, "Page successfully sent via $base (code: ${response.code})")
-                        if (hasSucceeded.compareAndSet(false, true)) {
-                            onResult(true, "${pageLevel.title} sent successfully!")
-                        }
-                    } else {
-                        Log.w(TAG, "Server $base returned error code ${response.code}")
-                    }
-                    if (completedCount.incrementAndGet() == totalServers && !hasSucceeded.get()) {
-                        onResult(false, "Error delivering page across push relays.")
-                    }
-                }
-            })
-        }
+            }
+        })
     }
 
     /**
@@ -193,50 +172,30 @@ object PushSender {
         val jsonPayload = buildPayloadJson(msg, myPrivateKey, peerPublicKey)
         val cleanSender = myName.filter { it.code in 32..126 }
 
-        val serverCandidates = mutableListOf<String>()
-        val primary = if (serverUrl.isNotBlank()) (if (serverUrl.endsWith("/")) serverUrl else "$serverUrl/") else DEFAULT_NTFY_BASE_URL
-        serverCandidates.add(primary)
-        FALLBACK_SERVERS.forEach { fb ->
-            if (!serverCandidates.contains(fb)) serverCandidates.add(fb)
-        }
+        val targetBase = if (serverUrl.isNotBlank()) (if (serverUrl.endsWith("/")) serverUrl else "$serverUrl/") else DEFAULT_NTFY_BASE_URL
+        val url = "$targetBase$topic"
+        val request = Request.Builder()
+            .url(url)
+            .addHeader("User-Agent", USER_AGENT)
+            .addHeader("Priority", "3")
+            .addHeader("Title", if (isReply) "Pairing Confirmed by ${cleanSender.ifBlank { "Family" }}" else "Pairing Handshake from ${cleanSender.ifBlank { "Family" }}")
+            .addHeader("Content-Type", "application/json")
+            .post(jsonPayload.toRequestBody("application/json; charset=utf-8".toMediaType()))
+            .build()
 
-        val completedCount = java.util.concurrent.atomic.AtomicInteger(0)
-        val hasSucceeded = java.util.concurrent.atomic.AtomicBoolean(false)
-        val totalServers = serverCandidates.size
-
-        serverCandidates.forEach { base ->
-            val request = Request.Builder()
-                .url("$base$topic")
-                .addHeader("User-Agent", USER_AGENT)
-                .addHeader("Priority", "3")
-                .addHeader("Title", if (isReply) "Pairing Confirmed by ${cleanSender.ifBlank { "Family" }}" else "Pairing Handshake from ${cleanSender.ifBlank { "Family" }}")
-                .addHeader("Content-Type", "application/json")
-                .post(jsonPayload.toRequestBody("application/json; charset=utf-8".toMediaType()))
-                .build()
-
-            client.newCall(request).enqueue(object : Callback {
-                override fun onFailure(call: Call, e: IOException) {
-                    if (completedCount.incrementAndGet() == totalServers && !hasSucceeded.get()) {
-                        onResult(false)
-                    }
-                }
-                override fun onResponse(call: Call, response: Response) {
-                    if (response.isSuccessful) {
-                        if (hasSucceeded.compareAndSet(false, true)) {
-                            onResult(true)
-                        }
-                    }
-                    if (completedCount.incrementAndGet() == totalServers && !hasSucceeded.get()) {
-                        onResult(false)
-                    }
-                }
-            })
-        }
+        client.newCall(request).enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                Log.w(TAG, "Pairing dispatch failed on $targetBase: ${e.localizedMessage}")
+                onResult(false)
+            }
+            override fun onResponse(call: Call, response: Response) {
+                onResult(response.isSuccessful)
+            }
+        })
     }
 
     /**
      * Broadcasts a display name change to a paired contact so their local address book updates automatically.
-     * Dispatches in parallel across all relays.
      */
     fun sendNameUpdate(
         targetTopicId: String,
@@ -263,45 +222,26 @@ object PushSender {
         val jsonPayload = buildPayloadJson(msg, myPrivateKey, peerPublicKey)
         val cleanSender = newName.filter { it.code in 32..126 }
 
-        val serverCandidates = mutableListOf<String>()
-        val primary = if (serverUrl.isNotBlank()) (if (serverUrl.endsWith("/")) serverUrl else "$serverUrl/") else DEFAULT_NTFY_BASE_URL
-        serverCandidates.add(primary)
-        FALLBACK_SERVERS.forEach { fb ->
-            if (!serverCandidates.contains(fb)) serverCandidates.add(fb)
-        }
+        val targetBase = if (serverUrl.isNotBlank()) (if (serverUrl.endsWith("/")) serverUrl else "$serverUrl/") else DEFAULT_NTFY_BASE_URL
+        val url = "$targetBase$topic"
+        val request = Request.Builder()
+            .url(url)
+            .addHeader("User-Agent", USER_AGENT)
+            .addHeader("Priority", "2")
+            .addHeader("Title", "Name Update from ${cleanSender.ifBlank { "Family" }}")
+            .addHeader("Content-Type", "application/json")
+            .post(jsonPayload.toRequestBody("application/json; charset=utf-8".toMediaType()))
+            .build()
 
-        val completedCount = java.util.concurrent.atomic.AtomicInteger(0)
-        val hasSucceeded = java.util.concurrent.atomic.AtomicBoolean(false)
-        val totalServers = serverCandidates.size
-
-        serverCandidates.forEach { base ->
-            val request = Request.Builder()
-                .url("$base$topic")
-                .addHeader("User-Agent", USER_AGENT)
-                .addHeader("Priority", "2")
-                .addHeader("Title", "Name Update from ${cleanSender.ifBlank { "Family" }}")
-                .addHeader("Content-Type", "application/json")
-                .post(jsonPayload.toRequestBody("application/json; charset=utf-8".toMediaType()))
-                .build()
-
-            client.newCall(request).enqueue(object : Callback {
-                override fun onFailure(call: Call, e: IOException) {
-                    if (completedCount.incrementAndGet() == totalServers && !hasSucceeded.get()) {
-                        onResult(false)
-                    }
-                }
-                override fun onResponse(call: Call, response: Response) {
-                    if (response.isSuccessful) {
-                        if (hasSucceeded.compareAndSet(false, true)) {
-                            onResult(true)
-                        }
-                    }
-                    if (completedCount.incrementAndGet() == totalServers && !hasSucceeded.get()) {
-                        onResult(false)
-                    }
-                }
-            })
-        }
+        client.newCall(request).enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                Log.w(TAG, "Name update failed on $targetBase: ${e.localizedMessage}")
+                onResult(false)
+            }
+            override fun onResponse(call: Call, response: Response) {
+                onResult(response.isSuccessful)
+            }
+        })
     }
 
     /**
@@ -332,45 +272,26 @@ object PushSender {
         val jsonPayload = buildPayloadJson(msg, myPrivateKey, peerPublicKey)
         val cleanSender = acknowledgerName.filter { it.code in 32..126 }
 
-        val serverCandidates = mutableListOf<String>()
-        val primary = if (serverUrl.isNotBlank()) (if (serverUrl.endsWith("/")) serverUrl else "$serverUrl/") else DEFAULT_NTFY_BASE_URL
-        serverCandidates.add(primary)
-        FALLBACK_SERVERS.forEach { fb ->
-            if (!serverCandidates.contains(fb)) serverCandidates.add(fb)
-        }
+        val targetBase = if (serverUrl.isNotBlank()) (if (serverUrl.endsWith("/")) serverUrl else "$serverUrl/") else DEFAULT_NTFY_BASE_URL
+        val url = "$targetBase$topic"
+        val request = Request.Builder()
+            .url(url)
+            .addHeader("User-Agent", USER_AGENT)
+            .addHeader("Priority", "4")
+            .addHeader("Title", "Page Acknowledged by ${cleanSender.ifBlank { "Family" }} ✔")
+            .addHeader("Tags", "white_check_mark")
+            .addHeader("Content-Type", "application/json")
+            .post(jsonPayload.toRequestBody("application/json; charset=utf-8".toMediaType()))
+            .build()
 
-        val completedCount = java.util.concurrent.atomic.AtomicInteger(0)
-        val hasSucceeded = java.util.concurrent.atomic.AtomicBoolean(false)
-        val totalServers = serverCandidates.size
-
-        serverCandidates.forEach { base ->
-            val request = Request.Builder()
-                .url("$base$topic")
-                .addHeader("User-Agent", USER_AGENT)
-                .addHeader("Priority", "4")
-                .addHeader("Title", "Page Acknowledged by ${cleanSender.ifBlank { "Family" }} ✔")
-                .addHeader("Tags", "white_check_mark")
-                .addHeader("Content-Type", "application/json")
-                .post(jsonPayload.toRequestBody("application/json; charset=utf-8".toMediaType()))
-                .build()
-
-            client.newCall(request).enqueue(object : Callback {
-                override fun onFailure(call: Call, e: IOException) {
-                    if (completedCount.incrementAndGet() == totalServers && !hasSucceeded.get()) {
-                        onResult(false)
-                    }
-                }
-                override fun onResponse(call: Call, response: Response) {
-                    if (response.isSuccessful) {
-                        if (hasSucceeded.compareAndSet(false, true)) {
-                            onResult(true)
-                        }
-                    }
-                    if (completedCount.incrementAndGet() == totalServers && !hasSucceeded.get()) {
-                        onResult(false)
-                    }
-                }
-            })
-        }
+        client.newCall(request).enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                Log.w(TAG, "Alert ack failed on $targetBase: ${e.localizedMessage}")
+                onResult(false)
+            }
+            override fun onResponse(call: Call, response: Response) {
+                onResult(response.isSuccessful)
+            }
+        })
     }
 }
