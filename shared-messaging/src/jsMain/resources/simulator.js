@@ -692,6 +692,7 @@ class PagerCoreEngine {
         const cd = (cooldowns[phoneKey] && cooldowns[phoneKey][c.topicId]) || 0;
         const isCoolingDown = cd > 0;
         const isRecentlyAcked = c.lastAck && (Date.now() - c.lastAck < 600000);
+        const inputId = `${phoneKey}_msg_${c.topicId}`;
 
         const item = document.createElement('div');
         item.className = "bg-white p-3 rounded-xl border border-slate-200 shadow-sm space-y-2";
@@ -719,6 +720,9 @@ class PagerCoreEngine {
               ${isRecentlyAcked ? '<div class="text-[10px] text-emerald-600 font-bold flex items-center gap-1 mt-0.5"><span>✔</span> <span>Page Acknowledged</span></div>' : ''}
             </div>
             <span class="text-[9px] bg-slate-100 text-slate-500 font-mono px-1.5 py-0.5 rounded truncate max-w-[130px]">${c.topicId}</span>
+          </div>
+          <div>
+            <input id="${inputId}" type="text" placeholder="Optional message (e.g. Call me, dinner ready...)" class="w-full border border-slate-200 px-2 py-1 rounded text-[11px] bg-slate-50 focus:bg-white focus:outline-none focus:ring-1 focus:ring-amber-500 text-slate-700">
           </div>
           <div class="grid grid-cols-2 gap-2 pt-1">
             ${heyBtnHtml}
@@ -757,7 +761,10 @@ class PagerCoreEngine {
 
       logDevice(senderKey, `🚨 Triggering ${level} alert (10s cooldown started)...`, isSos ? "text-red-400 font-bold" : "text-amber-400 font-bold");
 
-      const text = isSos ? "EMERGENCY: Urgent assistance needed!" : "Hey look! Check your phone when free.";
+      const msgInput = document.getElementById(`${senderKey}_msg_${targetTopic}`);
+      const customMsg = msgInput ? msgInput.value.trim() : "";
+      const defaultText = isSos ? "EMERGENCY: Urgent assistance needed!" : "Hey look! Check your phone when free.";
+      const text = customMsg || defaultText;
       const payload = senderObj.engine.buildPagePayload(targetTopic, level, text, Date.now());
 
       const success = await sendPushPayload(

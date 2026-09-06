@@ -138,7 +138,7 @@ class MainActivity : ComponentActivity() {
                     onPasteFromClipboard = { getClipboardText() },
                     onShareText = { title, text -> shareText(title, text) },
                     onScanQrCode = { launchQrScanner() },
-                    onSendPage = { contact, level -> sendRemotePage(contact, level) },
+                    onSendPage = { contact, level, customMessage -> sendRemotePage(contact, level, customMessage) },
                     onInstallUpdate = { info ->
                         AppUpdateManager.downloadAndInstallUpdate(this, info.apkDownloadUrl, info.latestVersionName)
                         Toast.makeText(this, "Downloading update ${info.latestVersionName}...", Toast.LENGTH_SHORT).show()
@@ -219,7 +219,7 @@ class MainActivity : ComponentActivity() {
         startActivity(Intent.createChooser(intent, title))
     }
 
-    private fun sendRemotePage(contact: PairedContact, pageLevel: PageLevel) {
+    private fun sendRemotePage(contact: PairedContact, pageLevel: PageLevel, customMessage: String? = null) {
         try {
             val state = viewModel.uiState
             val peerPublicKey = if (contact.publicKeyBase64.isNotBlank()) {
@@ -233,6 +233,9 @@ class MainActivity : ComponentActivity() {
 
             viewModel.startCooldown(contact.topicId, 10)
 
+            val defaultMsg = if (pageLevel == PageLevel.HEY_LOOK) "Hey look! Check your phone when free." else "EMERGENCY: Urgent assistance needed!"
+            val finalMsg = if (!customMessage.isNullOrBlank()) customMessage.trim() else defaultMsg
+
             PushSender.sendPage(
                 targetTopicId = contact.topicId,
                 senderName = state.myName,
@@ -241,7 +244,7 @@ class MainActivity : ComponentActivity() {
                 senderPrivateKey = repository.getMyPrivateKey(),
                 recipientPublicKey = peerPublicKey,
                 pageLevel = pageLevel,
-                messageText = if (pageLevel == PageLevel.HEY_LOOK) "Hey look! Check your phone when free." else "EMERGENCY: Urgent assistance needed!",
+                messageText = finalMsg,
                 serverUrl = targetServer,
                 onResult = { isSuccess, resultMsg ->
                     runOnUiThread {
@@ -271,7 +274,7 @@ fun MainPagerApp(
     onPasteFromClipboard: () -> String?,
     onShareText: (String, String) -> Unit,
     onScanQrCode: () -> Unit,
-    onSendPage: (PairedContact, PageLevel) -> Unit,
+    onSendPage: (PairedContact, PageLevel, String?) -> Unit,
     onInstallUpdate: (AppUpdateManager.UpdateInfo) -> Unit
 ) {
     var selectedTab by remember { mutableStateOf(0) }
@@ -365,7 +368,7 @@ fun MainPagerApp(
 fun FamilyContactsScreen(
     uiState: MainUiState,
     onDeleteContact: (String) -> Unit,
-    onPageContact: (PairedContact, PageLevel) -> Unit,
+    onPageContact: (PairedContact, PageLevel, String?) -> Unit,
     onGoToSetupTab: () -> Unit
 ) {
     Column(
@@ -432,6 +435,18 @@ fun FamilyContactsScreen(
 
                         Spacer(modifier = Modifier.height(12.dp))
 
+                        var customMessage by remember(contact.topicId) { mutableStateOf("") }
+
+                        OutlinedTextField(
+                            value = customMessage,
+                            onValueChange = { customMessage = it },
+                            placeholder = { Text("Optional message (e.g. Call me, dinner ready...)", fontSize = 12.sp) },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
                         val cooldown = uiState.cooldowns[contact.topicId] ?: 0
                         val isCoolingDown = cooldown > 0
 
@@ -441,7 +456,7 @@ fun FamilyContactsScreen(
                         ) {
                             // Level 1: Hey look!
                             Button(
-                                onClick = { onPageContact(contact, PageLevel.HEY_LOOK) },
+                                onClick = { onPageContact(contact, PageLevel.HEY_LOOK, customMessage) },
                                 enabled = !isCoolingDown,
                                 colors = ButtonDefaults.buttonColors(
                                     containerColor = Color(PageLevel.HEY_LOOK.colorHex),
@@ -456,7 +471,7 @@ fun FamilyContactsScreen(
 
                             // Level 2: SOS
                             Button(
-                                onClick = { onPageContact(contact, PageLevel.SOS) },
+                                onClick = { onPageContact(contact, PageLevel.SOS, customMessage) },
                                 enabled = !isCoolingDown,
                                 colors = ButtonDefaults.buttonColors(
                                     containerColor = Color(PageLevel.SOS.colorHex),

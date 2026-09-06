@@ -39,7 +39,7 @@ jobs:
       run: |
         BUILD_NO=$((1000 + GITHUB_RUN_NUMBER))
         echo "BUILD_NUMBER=$BUILD_NO" >> $GITHUB_ENV
-        echo "BUILD_TAG=v1.1.0.$BUILD_NO" >> $GITHUB_ENV
+        echo "BUILD_TAG=v1.0.2.$BUILD_NO" >> $GITHUB_ENV
 
     - name: Run Unit Tests
       run: gradle test
