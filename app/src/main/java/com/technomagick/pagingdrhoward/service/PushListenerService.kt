@@ -26,7 +26,6 @@ import java.util.concurrent.TimeUnit
 class PushListenerService : Service() {
 
     private var eventSource: EventSource? = null
-    private val processedMessageSignatures = mutableSetOf<String>()
     private var reconnectAttempt = 0
     private var currentServerIndex = 0
     private var serviceStartTimeMs = System.currentTimeMillis()
@@ -43,10 +42,107 @@ class PushListenerService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    private lateinit var coreEngine: com.technomagick.pagingdrhoward.shared.PagerCoreEngine
+
     override fun onCreate() {
         super.onCreate()
         serviceStartTimeMs = System.currentTimeMillis()
+        val prefs = getSharedPreferences(DefaultPagerRepository.PREF_NAME, Context.MODE_PRIVATE)
+        val repository = DefaultPagerRepository(prefs)
+        coreEngine = com.technomagick.pagingdrhoward.shared.PagerCoreEngine(
+            myTopicId = repository.getMyTopicId(),
+            myName = repository.getMyName(),
+            relayServerUrl = repository.getRelayServerUrl(),
+            startTimeMs = serviceStartTimeMs
+        )
         DndHelper.createEmergencyNotificationChannel(this)
+    }
+
+    private fun handleEngineEvent(event: com.technomagick.pagingdrhoward.shared.EngineEvent, repository: DefaultPagerRepository) {
+        when (event) {
+            is com.technomagick.pagingdrhoward.shared.EngineEvent.AlertTriggered -> {
+                Log.i(TAG, "Engine alert triggered from ${event.senderName} (${event.level.code})")
+                val pageLevel = PageLevel.fromCode(event.level.code)
+                val serviceIntent = Intent(this, EmergencyPagerService::class.java).apply {
+                    action = EmergencyPagerService.ACTION_START_ALARM
+                    putExtra("EXTRA_SENDER", event.senderName)
+                    putExtra("EXTRA_SENDER_TOPIC", event.senderTopicId)
+                    putExtra("EXTRA_MESSAGE", event.messageText)
+                    putExtra("EXTRA_LEVEL", pageLevel.code)
+                    putExtra("EXTRA_TIMESTAMP", event.timestamp)
+                    if (!event.messageKey.isNullOrBlank()) {
+                        putExtra("EXTRA_MESSAGE_KEY", event.messageKey)
+                    }
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    startForegroundService(serviceIntent)
+                } else {
+                    startService(serviceIntent)
+                }
+            }
+            is com.technomagick.pagingdrhoward.shared.EngineEvent.PageAckReceived -> {
+                Log.i(TAG, "Engine received PAGE_ACK from ${event.senderName}")
+                if (!event.messageKey.isNullOrBlank()) {
+                    PushSender.deleteMessage(repository.getRelayServerUrl(), repository.getMyTopicId(), event.messageKey)
+                }
+                val ackNotification = NotificationCompat.Builder(this, DndHelper.CHANNEL_STATUS_ID)
+                    .setSmallIcon(android.R.drawable.ic_dialog_info)
+                    .setContentTitle("Page Acknowledged ✔")
+                    .setContentText("${event.senderName} confirmed receipt of your page.")
+                    .setPriority(NotificationCompat.PRIORITY_HIGH)
+                    .setAutoCancel(true)
+                    .build()
+                val notificationManager = getSystemService(NOTIFICATION_SERVICE) as android.app.NotificationManager
+                notificationManager.notify((System.currentTimeMillis() % 10000).toInt(), ackNotification)
+            }
+            is com.technomagick.pagingdrhoward.shared.EngineEvent.PairingReceived -> {
+                Log.i(TAG, "Engine received pairing from ${event.senderName}")
+                val existing = repository.getPairedContacts().find { it.topicId == event.senderTopicId }
+                val contact = PairedContact(
+                    id = existing?.id ?: event.senderTopicId,
+                    name = event.senderName.ifBlank { existing?.name ?: "Family Member" },
+                    topicId = event.senderTopicId,
+                    publicKeyBase64 = event.senderPublicKey.ifBlank { existing?.publicKeyBase64 ?: "" },
+                    passphrase = existing?.passphrase ?: ""
+                )
+                repository.savePairedContact(contact)
+                if (!event.messageKey.isNullOrBlank()) {
+                    PushSender.deleteMessage(repository.getRelayServerUrl(), repository.getMyTopicId(), event.messageKey)
+                }
+                if (event.requiresReply) {
+                    val peerPublicKey = if (event.senderPublicKey.isNotBlank()) {
+                        try { CryptoManager.publicKeyFromBase64(event.senderPublicKey) } catch (e: Exception) { null }
+                    } else null
+                    PushSender.sendPairingHandshake(
+                        targetTopicId = event.senderTopicId,
+                        myName = repository.getMyName(),
+                        myTopicId = repository.getMyTopicId(),
+                        myPublicKeyBase64 = repository.getMyPublicKeyBase64(),
+                        myPrivateKey = repository.getMyPrivateKey(),
+                        peerPublicKey = peerPublicKey,
+                        isReply = true,
+                        serverUrl = repository.getRelayServerUrl()
+                    )
+                }
+            }
+            is com.technomagick.pagingdrhoward.shared.EngineEvent.NameUpdateReceived -> {
+                Log.i(TAG, "Engine received name update from ${event.newName}")
+                val existing = repository.getPairedContacts().find { it.topicId == event.senderTopicId }
+                if (existing != null) {
+                    repository.savePairedContact(existing.copy(name = event.newName))
+                }
+                if (!event.messageKey.isNullOrBlank()) {
+                    PushSender.deleteMessage(repository.getRelayServerUrl(), repository.getMyTopicId(), event.messageKey)
+                }
+            }
+            is com.technomagick.pagingdrhoward.shared.EngineEvent.PurgeRequired -> {
+                Log.d(TAG, "Engine requested purge for key: ${event.messageKey}")
+                PushSender.deleteMessage(repository.getRelayServerUrl(), repository.getMyTopicId(), event.messageKey)
+            }
+            is com.technomagick.pagingdrhoward.shared.EngineEvent.Ignored -> {
+                // Do nothing
+            }
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -106,42 +202,18 @@ class PushListenerService : Service() {
             override fun onEvent(eventSource: EventSource, id: String?, type: String?, data: String) {
                 Log.d(TAG, "Received push event (type=$type): $data")
                 try {
-                    val json = JSONObject(data)
-                    // Firebase RTDB streaming format: event is put or patch, data contains {"path":"/", "data":{...}}
-                    if (type == "put" || type == "patch" || json.has("data")) {
-                        val path = json.optString("path", "")
-                        val innerData = json.opt("data")
-
-                        // If data is null or empty, this is a deletion event from RTDB (e.g. DELETE /channels/topic/key.json)
-                        if (innerData == null || innerData == JSONObject.NULL) {
-                            Log.d(TAG, "RTDB node deleted: $path")
-                            return
-                        }
-
-                        if (innerData is JSONObject) {
-                            if (innerData.has("type")) {
-                                val key = path.removePrefix("/").trim()
-                                processIncomingPayload(innerData.toString(), repository, if (key.isNotBlank()) key else null)
-                            } else {
-                                val keys = innerData.keys()
-                                while (keys.hasNext()) {
-                                    val k = keys.next()
-                                    val item = innerData.optJSONObject(k)
-                                    if (item != null && item.has("type")) {
-                                        processIncomingPayload(item.toString(), repository, k)
-                                    }
-                                }
-                            }
-                            return
-                        }
+                    // Sync any recent dismissed keys and timestamp persisted by EmergencyAlertActivity
+                    repository.getDismissedMessageKeys().forEach { key ->
+                        coreEngine.markMessageDismissed(key)
+                    }
+                    val lastDismissed = repository.getLastDismissedAlertTimestamp()
+                    if (lastDismissed > coreEngine.lastDismissedAlertTimestamp) {
+                        coreEngine.lastDismissedAlertTimestamp = lastDismissed
                     }
 
-                    // Standard ntfy/SSE format fallback
-                    val eventType = json.optString("event", "message")
-                    if (eventType != "message") return
-                    val rawMessage = json.optString("message", "")
-                    if (rawMessage.isNotBlank()) {
-                        processIncomingPayload(rawMessage, repository, null)
+                    val events = coreEngine.processRawEvent(data, System.currentTimeMillis())
+                    for (event in events) {
+                        handleEngineEvent(event, repository)
                     }
                 } catch (e: Exception) {
                     Log.e(TAG, "Error processing push event", e)
@@ -178,187 +250,6 @@ class PushListenerService : Service() {
         android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
             startSseListener()
         }, delayMs)
-    }
-
-    private fun processIncomingPayload(payloadStr: String, repository: DefaultPagerRepository, messageKey: String? = null) {
-        try {
-            val json = JSONObject(payloadStr)
-            val type = json.optString("type", "PAGE")
-            val senderName = json.optString("senderName", "Family Member")
-            val senderTopicId = json.optString("senderTopicId", "")
-            val senderPubKeyBase64 = json.optString("senderPublicKey", "")
-            val levelCode = json.optString("level", PageLevel.SOS.code)
-            val timestamp = json.optLong("timestamp", 0L)
-            val ciphertext = json.optString("ciphertext", "")
-            val signature = json.optString("signature", "")
-            val pageLevel = PageLevel.fromCode(levelCode)
-
-            // Helper to clean up message from RTDB if key is known
-            fun purgeThisMessage() {
-                if (!messageKey.isNullOrBlank()) {
-                    PushSender.deleteMessage(repository.getRelayServerUrl(), repository.getMyTopicId(), messageKey)
-                }
-            }
-
-            // Check if this exact message was already dismissed by user
-            if (!messageKey.isNullOrBlank() && repository.isMessageDismissed(messageKey)) {
-                Log.d(TAG, "Ignored already dismissed message key: $messageKey, purging...")
-                purgeThisMessage()
-                return
-            }
-
-            // Drop self-echo messages (e.g. if sending to a shared topic or looped relay)
-            if (senderTopicId.isNotBlank() && senderTopicId == repository.getMyTopicId()) {
-                Log.d(TAG, "Ignored self-echo message from topic: $senderTopicId")
-                purgeThisMessage()
-                return
-            }
-
-            // Replay protection: Ignore messages older than 10 minutes or future timestamps > 10 minutes off
-            val now = System.currentTimeMillis()
-            if (timestamp > 0 && Math.abs(now - timestamp) > 600_000) {
-                Log.d(TAG, "Ignored stale message from timestamp $timestamp (current: $now), purging...")
-                purgeThisMessage()
-                return
-            }
-
-            // Stale history filter: When connecting to Firebase RTDB, ignore historical messages sent before service connection
-            if (timestamp > 0 && timestamp < (serviceStartTimeMs - 5000L)) {
-                Log.d(TAG, "Ignored pre-existing historical message from timestamp $timestamp (service started at $serviceStartTimeMs), purging...")
-                purgeThisMessage()
-                return
-            }
-
-            // Dismissal filter: Ignore emergency alerts previously acknowledged/dismissed by the user
-            val lastDismissed = repository.getLastDismissedAlertTimestamp()
-            if (type == "PAGE" && timestamp > 0 && timestamp <= lastDismissed) {
-                Log.d(TAG, "Ignored already dismissed page from timestamp $timestamp (lastDismissed: $lastDismissed), purging...")
-                purgeThisMessage()
-                return
-            }
-
-            // Deduplication: Avoid processing identical signature repeatedly
-            val dedupeKey = if (signature.isNotBlank()) signature else "$senderTopicId:$timestamp"
-            if (processedMessageSignatures.contains(dedupeKey)) {
-                Log.d(TAG, "Ignored already processed message dedupeKey: $dedupeKey")
-                return
-            }
-            processedMessageSignatures.add(dedupeKey)
-            if (processedMessageSignatures.size > 200) {
-                processedMessageSignatures.clear()
-            }
-
-            if (type == "PAIRING_HANDSHAKE" || type == "PAIRING_HANDSHAKE_REPLY" || type == "NAME_UPDATE") {
-                // Auto-save or update contact in address book
-                if (senderTopicId.isNotBlank()) {
-                    val existing = repository.getPairedContacts().find { it.topicId == senderTopicId }
-                    val contact = PairedContact(
-                        id = existing?.id ?: senderTopicId,
-                        name = senderName.ifBlank { existing?.name ?: "Family Member" },
-                        topicId = senderTopicId,
-                        publicKeyBase64 = senderPubKeyBase64.ifBlank { existing?.publicKeyBase64 ?: "" },
-                        passphrase = existing?.passphrase ?: ""
-                    )
-                    repository.savePairedContact(contact)
-                    Log.i(TAG, "Processed $type for contact: $senderName ($senderTopicId)")
-
-                    // Once processed, delete the handshake/update message from RTDB
-                    purgeThisMessage()
-
-                    // If this is an initial PAIRING_HANDSHAKE (not a reply), immediately reply so pairing is bidirectional!
-                    if (type == "PAIRING_HANDSHAKE") {
-                        val peerPublicKey = if (senderPubKeyBase64.isNotBlank()) {
-                            try { CryptoManager.publicKeyFromBase64(senderPubKeyBase64) } catch (e: Exception) { null }
-                        } else null
-
-                        PushSender.sendPairingHandshake(
-                            targetTopicId = senderTopicId,
-                            myName = repository.getMyName(),
-                            myTopicId = repository.getMyTopicId(),
-                            myPublicKeyBase64 = repository.getMyPublicKeyBase64(),
-                            myPrivateKey = repository.getMyPrivateKey(),
-                            peerPublicKey = peerPublicKey,
-                            isReply = true,
-                            serverUrl = repository.getRelayServerUrl()
-                        )
-                    }
-                } else {
-                    purgeThisMessage()
-                }
-                return
-            }
-
-            if (type == "PAGE_ACK") {
-                Log.i(TAG, "Received PAGE_ACK from $senderName ($senderTopicId)")
-                purgeThisMessage()
-
-                // Post acknowledgment notification to user
-                val ackNotification = NotificationCompat.Builder(this, DndHelper.CHANNEL_STATUS_ID)
-                    .setSmallIcon(android.R.drawable.ic_dialog_info)
-                    .setContentTitle("Page Acknowledged ✔")
-                    .setContentText("$senderName confirmed receipt of your page.")
-                    .setPriority(NotificationCompat.PRIORITY_HIGH)
-                    .setAutoCancel(true)
-                    .build()
-                val notificationManager = getSystemService(NOTIFICATION_SERVICE) as android.app.NotificationManager
-                notificationManager.notify((System.currentTimeMillis() % 10000).toInt(), ackNotification)
-                return
-            }
-
-            // Verify ECDSA signature if public key & signature are present
-            var isSignatureValid = true
-            if (senderPubKeyBase64.isNotBlank() && signature.isNotBlank()) {
-                try {
-                    val senderPubKey = CryptoManager.publicKeyFromBase64(senderPubKeyBase64)
-                    val dataToVerify = "$senderTopicId:$levelCode:$timestamp:$ciphertext"
-                    isSignatureValid = CryptoManager.verify(senderPubKey, dataToVerify, signature)
-                } catch (e: Exception) {
-                    Log.w(TAG, "Failed signature verification", e)
-                    isSignatureValid = false
-                }
-            }
-
-            // Reject invalid incoming pages (if signature was provided but failed verification)
-            if (!isSignatureValid) {
-                Log.w(TAG, "Rejected page: Signature validation failed from $senderName")
-                purgeThisMessage()
-                return
-            }
-
-            // Decrypt message text if encrypted
-            var decryptedMessage = ciphertext
-            val myPrivateKey = repository.getMyPrivateKey()
-            if (myPrivateKey != null && senderPubKeyBase64.isNotBlank()) {
-                try {
-                    val senderPubKey = CryptoManager.publicKeyFromBase64(senderPubKeyBase64)
-                    val sharedKey = CryptoManager.deriveSharedAesKey(myPrivateKey, senderPubKey)
-                    decryptedMessage = CryptoManager.decryptWithSharedKey(sharedKey, ciphertext)
-                } catch (e: Exception) {
-                    Log.w(TAG, "Decryption error, falling back to raw ciphertext", e)
-                }
-            }
-
-            // Trigger emergency full-volume alert & wake screen
-            val serviceIntent = Intent(this, EmergencyPagerService::class.java).apply {
-                action = EmergencyPagerService.ACTION_START_ALARM
-                putExtra("EXTRA_SENDER", senderName)
-                putExtra("EXTRA_SENDER_TOPIC", senderTopicId)
-                putExtra("EXTRA_MESSAGE", decryptedMessage)
-                putExtra("EXTRA_LEVEL", pageLevel.code)
-                putExtra("EXTRA_TIMESTAMP", timestamp)
-                if (!messageKey.isNullOrBlank()) {
-                    putExtra("EXTRA_MESSAGE_KEY", messageKey)
-                }
-            }
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                startForegroundService(serviceIntent)
-            } else {
-                startService(serviceIntent)
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error handling incoming payload", e)
-        }
     }
 
     private fun createForegroundNotification(): Notification {

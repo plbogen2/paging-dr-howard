@@ -1,3 +1,206 @@
+// PagerCoreEngine: Shared single-source-of-truth message processing engine
+class PagerCoreEngine {
+  constructor(myTopicId, myName, relayServerUrl = "https://paging-dr-howard-default-rtdb.firebaseio.com/", startTimeMs = 0) {
+    this.myTopicId = myTopicId;
+    this.myName = myName;
+    this.relayServerUrl = relayServerUrl;
+    this.startTimeMs = startTimeMs;
+    this.dismissedKeys = new Set();
+    this.processedSignatures = new Set();
+    this.lastDismissedAlertTimestamp = 0;
+  }
+
+  isMessageDismissed(messageKey) {
+    return this.dismissedKeys.has(messageKey);
+  }
+
+  markMessageDismissed(messageKey, timestamp = 0) {
+    if (messageKey) {
+      this.dismissedKeys.add(messageKey);
+      if (this.dismissedKeys.size > 200) {
+        const firstKey = this.dismissedKeys.values().next().value;
+        this.dismissedKeys.delete(firstKey);
+      }
+    }
+    if (timestamp > this.lastDismissedAlertTimestamp) {
+      this.lastDismissedAlertTimestamp = timestamp;
+    }
+  }
+
+  processRawEvent(eventString, currentTimestamp = Date.now()) {
+    const trimmed = (eventString || "").trim();
+    if (!trimmed) return [];
+
+    try {
+      const rootElement = JSON.parse(trimmed);
+      if (typeof rootElement !== 'object' || rootElement === null) return [];
+
+      // 1. Firebase RTDB streaming format: {"path":"...", "data":...}
+      if ('data' in rootElement || 'path' in rootElement) {
+        const path = rootElement.path || "";
+        const dataElem = rootElement.data;
+
+        // RTDB node deletion event: data is null
+        if (dataElem === null || dataElem === undefined) {
+          return [];
+        }
+
+        if (typeof dataElem === 'object') {
+          if ('type' in dataElem) {
+            const key = path.replace(/^\//, '').trim() || null;
+            return [this.processPayloadObject(dataElem, key, currentTimestamp)];
+          } else {
+            // Root collection put: {"path":"/", "data":{"key1":{...}, "key2":{...}}}
+            const events = [];
+            for (const [key, child] of Object.entries(dataElem)) {
+              if (child && typeof child === 'object' && 'type' in child) {
+                events.push(this.processPayloadObject(child, key, currentTimestamp));
+              }
+            }
+            return events;
+          }
+        }
+        return [];
+      } else {
+        // Standard single payload
+        return [this.processPayloadObject(rootElement, null, currentTimestamp)];
+      }
+    } catch (e) {
+      return [];
+    }
+  }
+
+  processPayloadObject(obj, messageKey, currentTimestamp = Date.now()) {
+    const type = obj.type || "PAGE";
+    const senderName = obj.senderName || "Family Member";
+    const senderTopicId = obj.senderTopicId || "";
+    const senderPublicKey = obj.senderPublicKey || "";
+    const level = obj.level || "SOS";
+    const timestamp = Number(obj.timestamp) || 0;
+    const ciphertext = obj.ciphertext || "";
+    const signature = obj.signature || "";
+
+    // Rule 1: Dismissal filter
+    if (messageKey && this.isMessageDismissed(messageKey)) {
+      return { type: "PURGE_REQUIRED", messageKey };
+    }
+
+    // Rule 2: Self-echo filter
+    if (senderTopicId && senderTopicId === this.myTopicId) {
+      return messageKey ? { type: "PURGE_REQUIRED", messageKey } : { type: "IGNORED" };
+    }
+
+    // Rule 3: Replay protection (10 minutes drift)
+    if (timestamp > 0 && Math.abs(currentTimestamp - timestamp) > 600000) {
+      return messageKey ? { type: "PURGE_REQUIRED", messageKey } : { type: "IGNORED" };
+    }
+
+    // Rule 4: Stale history filter (messages prior to session connection)
+    if (this.startTimeMs > 0 && timestamp > 0 && timestamp < (this.startTimeMs - 5000)) {
+      return messageKey ? { type: "PURGE_REQUIRED", messageKey } : { type: "IGNORED" };
+    }
+
+    // Rule 5: Timestamp dismissal cutoff for emergency pages
+    if (type === "PAGE" && timestamp > 0 && timestamp <= this.lastDismissedAlertTimestamp) {
+      return messageKey ? { type: "PURGE_REQUIRED", messageKey } : { type: "IGNORED" };
+    }
+
+    // Rule 6: Signature deduplication
+    const dedupeKey = signature || `${senderTopicId}:${timestamp}`;
+    if (this.processedSignatures.has(dedupeKey)) {
+      return { type: "IGNORED" };
+    }
+    this.processedSignatures.add(dedupeKey);
+    if (this.processedSignatures.size > 200) {
+      const firstSig = this.processedSignatures.values().next().value;
+      this.processedSignatures.delete(firstSig);
+    }
+
+    // Type routing
+    if (type === "PAGE") {
+      return {
+        type: "ALERT_TRIGGERED",
+        senderName,
+        senderTopicId,
+        messageText: ciphertext,
+        level,
+        timestamp,
+        messageKey
+      };
+    } else if (type === "PAGE_ACK") {
+      return {
+        type: "PAGE_ACK_RECEIVED",
+        senderName,
+        senderTopicId,
+        messageKey
+      };
+    } else if (type === "PAIRING_HANDSHAKE") {
+      return {
+        type: "PAIRING_RECEIVED",
+        senderName,
+        senderTopicId,
+        senderPublicKey,
+        requiresReply: true,
+        messageKey
+      };
+    } else if (type === "PAIRING_HANDSHAKE_REPLY") {
+      return {
+        type: "PAIRING_RECEIVED",
+        senderName,
+        senderTopicId,
+        senderPublicKey,
+        requiresReply: false,
+        messageKey
+      };
+    } else if (type === "NAME_UPDATE") {
+      return {
+        type: "NAME_UPDATE_RECEIVED",
+        newName: senderName,
+        senderTopicId,
+        messageKey
+      };
+    }
+
+    return { type: "IGNORED" };
+  }
+
+  buildPagePayload(targetTopicId, level, messageText, timestamp = Date.now(), senderPublicKey = "", signature = "") {
+    return {
+      type: "PAGE",
+      senderName: this.myName,
+      senderTopicId: this.myTopicId,
+      senderPublicKey,
+      level,
+      timestamp,
+      ciphertext: messageText,
+      signature
+    };
+  }
+
+  buildAckPayload(timestamp = Date.now(), senderPublicKey = "", signature = "") {
+    return {
+      type: "PAGE_ACK",
+      senderName: this.myName,
+      senderTopicId: this.myTopicId,
+      senderPublicKey,
+      level: "HEY_LOOK",
+      timestamp,
+      ciphertext: `Alert Acknowledged by ${this.myName}`,
+      signature
+    };
+  }
+
+  buildPairingPayload(isReply = false, timestamp = Date.now(), senderPublicKey = "") {
+    return {
+      type: isReply ? "PAIRING_HANDSHAKE_REPLY" : "PAIRING_HANDSHAKE",
+      senderName: this.myName,
+      senderTopicId: this.myTopicId,
+      senderPublicKey,
+      timestamp
+    };
+  }
+}
+
 // State
     let relayBase = "https://paging-dr-howard-default-rtdb.firebaseio.com";
     let topicA = 'pdh_sim_a_' + Math.random().toString(36).substring(2, 9);
@@ -8,7 +211,8 @@
       topic: topicA,
       contacts: {},
       eventSource: null,
-      activeAlertSenderTopic: null
+      activeAlertSenderTopic: null,
+      engine: new PagerCoreEngine(topicA, "Dad", relayBase, Date.now())
     };
 
     let phoneB = {
@@ -16,7 +220,8 @@
       topic: topicB,
       contacts: {},
       eventSource: null,
-      activeAlertSenderTopic: null
+      activeAlertSenderTopic: null,
+      engine: new PagerCoreEngine(topicB, "Daughter", relayBase, Date.now())
     };
 
     // Cooldown management
@@ -256,9 +461,6 @@
       if (phoneObj.dbRef) {
         phoneObj.dbRef.off();
       }
-      if (!phoneObj.dismissedAlertKeys) {
-        phoneObj.dismissedAlertKeys = new Set();
-      }
       const cleanTopic = phoneObj.topic.replace(/[^a-zA-Z0-9_-]/g, '_');
       const channelRef = db.ref(`channels/${cleanTopic}`);
       phoneObj.dbRef = channelRef;
@@ -267,108 +469,102 @@
       document.getElementById(statusElId).innerHTML = "🟢 Connected";
       document.getElementById(statusElId).className = "text-emerald-400 font-bold";
 
-      const startTime = Date.now();
       channelRef.limitToLast(10).on('child_added', (snapshot) => {
         const payload = snapshot.val();
         const msgKey = snapshot.key;
         if (!payload) return;
 
-        // Auto-purge stale pre-existing messages from database
-        if (payload.timestamp && payload.timestamp < (startTime - 3000)) {
-          channelRef.child(msgKey).remove().catch(() => {});
-          return;
-        }
-        if (payload.senderTopicId === phoneObj.topic) {
-          channelRef.child(msgKey).remove().catch(() => {});
-          return;
-        }
-        if (phoneObj.dismissedAlertKeys.has(msgKey)) {
-          channelRef.child(msgKey).remove().catch(() => {});
-          return;
-        }
-
-        handleIncomingPayload(phoneKey, phoneObj, payload, msgKey);
+        // Process message through shared PagerCoreEngine
+        const event = phoneObj.engine.processPayloadObject(payload, msgKey, Date.now());
+        handleEngineEvent(phoneKey, phoneObj, event, payload);
       });
     }
     const initSSE = initFirebaseListener;
 
-    async function handleIncomingPayload(recipientKey, recipientObj, payload, msgKey) {
+    async function handleEngineEvent(recipientKey, recipientObj, event, rawPayload) {
       const cleanTopic = recipientObj.topic.replace(/[^a-zA-Z0-9_-]/g, '_');
       const channelRef = db.ref(`channels/${cleanTopic}`);
-      const purgeMsg = () => {
-        if (msgKey) channelRef.child(msgKey).remove().catch(() => {});
+      const purgeMsg = (key) => {
+        if (key) channelRef.child(key).remove().catch(() => {});
       };
 
-      logDevice(recipientKey, `📥 [INCOMING ${payload.type}]`, "text-yellow-400 font-bold");
-      logDevice(recipientKey, `   From: "${payload.senderName || 'Unknown'}" (${payload.senderTopicId || 'N/A'})`, "text-yellow-200");
-      if (payload.level) logDevice(recipientKey, `   Level: ${payload.level}`, "text-yellow-200");
-      if (payload.ciphertext) logDevice(recipientKey, `   Payload: "${payload.ciphertext}"`, "text-slate-300");
+      switch (event.type) {
+        case "ALERT_TRIGGERED":
+          logDevice(recipientKey, `📥 [INCOMING PAGE (${event.level})]`, "text-yellow-400 font-bold");
+          logDevice(recipientKey, `   From: "${event.senderName}" (${event.senderTopicId})`, "text-yellow-200");
+          logDevice(recipientKey, `   Message: "${event.messageText}"`, "text-slate-300");
+          recipientObj.activeAlertMsgKey = event.messageKey;
+          recipientObj.activeAlertTimestamp = event.timestamp;
+          triggerAlertUI(recipientKey, recipientObj, event);
+          break;
 
-      if (payload.type === 'PAIRING_HANDSHAKE' || payload.type === 'PAIRING_HANDSHAKE_REPLY') {
-        recipientObj.contacts[payload.senderTopicId] = {
-          name: payload.senderName,
-          topicId: payload.senderTopicId
-        };
-        renderContacts(recipientKey, recipientObj);
-        logDevice(recipientKey, `   ✔ Added "${payload.senderName}" to address book!`, "text-emerald-400 font-bold");
+        case "PAGE_ACK_RECEIVED":
+          logDevice(recipientKey, `✅ [PAGE ACKNOWLEDGED]`, "text-emerald-400 font-extrabold text-sm");
+          logDevice(recipientKey, `   "${event.senderName}" acknowledged and silenced your alarm!`, "text-emerald-300 font-bold");
+          purgeMsg(event.messageKey);
+          break;
 
-        // Purge handshake message from RTDB immediately after processing
-        purgeMsg();
-
-        // Mutual linking: If this was the initial handshake (not a reply), auto-reply back with our credentials!
-        if (payload.type === 'PAIRING_HANDSHAKE') {
-          logDevice(recipientKey, `   🔄 Auto-sending PAIRING_HANDSHAKE_REPLY to complete mutual pair...`, "text-indigo-300");
-          const replyPacket = {
-            type: "PAIRING_HANDSHAKE_REPLY",
-            senderName: recipientObj.name,
-            senderTopicId: recipientObj.topic,
-            timestamp: Date.now()
-          };
-          sendPushPayload(recipientKey, payload.senderTopicId, replyPacket, `Pairing Handshake from ${recipientObj.name}`, "4", "handshake,white_check_mark");
-        }
-      } else if (payload.type === 'NAME_UPDATE') {
-        if (recipientObj.contacts[payload.senderTopicId]) {
-          const old = recipientObj.contacts[payload.senderTopicId].name;
-          recipientObj.contacts[payload.senderTopicId].name = payload.senderName;
-          renderContacts(recipientKey, recipientObj);
-          logDevice(recipientKey, `   ✔ Updated contact name from "${old}" to "${payload.senderName}"!`, "text-emerald-400 font-bold");
-        } else {
-          recipientObj.contacts[payload.senderTopicId] = {
-            name: payload.senderName,
-            topicId: payload.senderTopicId
+        case "PAIRING_RECEIVED":
+          recipientObj.contacts[event.senderTopicId] = {
+            name: event.senderName,
+            topicId: event.senderTopicId
           };
           renderContacts(recipientKey, recipientObj);
-          logDevice(recipientKey, `   ✔ Saved new contact "${payload.senderName}"!`, "text-emerald-400 font-bold");
-        }
-        purgeMsg();
-      } else if (payload.type === 'PAGE') {
-        recipientObj.activeAlertMsgKey = msgKey;
-        triggerAlertUI(recipientKey, recipientObj, payload);
-      } else if (payload.type === 'PAGE_ACK') {
-        logDevice(recipientKey, `✅ [PAGE ACKNOWLEDGED]`, "text-emerald-400 font-extrabold text-sm");
-        logDevice(recipientKey, `   "${payload.senderName}" acknowledged and silenced your alarm!`, "text-emerald-300 font-bold");
-        purgeMsg();
+          logDevice(recipientKey, `   ✔ Added "${event.senderName}" to address book!`, "text-emerald-400 font-bold");
+          purgeMsg(event.messageKey);
+
+          if (event.requiresReply) {
+            logDevice(recipientKey, `   🔄 Auto-sending PAIRING_HANDSHAKE_REPLY to complete mutual pair...`, "text-indigo-300");
+            const replyPacket = recipientObj.engine.buildPairingPayload(true, Date.now());
+            sendPushPayload(recipientKey, event.senderTopicId, replyPacket, `Pairing Handshake from ${recipientObj.name}`, "4", "handshake,white_check_mark");
+          }
+          break;
+
+        case "NAME_UPDATE_RECEIVED":
+          if (recipientObj.contacts[event.senderTopicId]) {
+            const old = recipientObj.contacts[event.senderTopicId].name;
+            recipientObj.contacts[event.senderTopicId].name = event.newName;
+            renderContacts(recipientKey, recipientObj);
+            logDevice(recipientKey, `   ✔ Updated contact name from "${old}" to "${event.newName}"!`, "text-emerald-400 font-bold");
+          } else {
+            recipientObj.contacts[event.senderTopicId] = {
+              name: event.newName,
+              topicId: event.senderTopicId
+            };
+            renderContacts(recipientKey, recipientObj);
+            logDevice(recipientKey, `   ✔ Saved new contact "${event.newName}"!`, "text-emerald-400 font-bold");
+          }
+          purgeMsg(event.messageKey);
+          break;
+
+        case "PURGE_REQUIRED":
+          purgeMsg(event.messageKey);
+          break;
+
+        case "IGNORED":
+        default:
+          break;
       }
     }
 
-    function triggerAlertUI(phoneKey, phoneObj, payload) {
+    function triggerAlertUI(phoneKey, phoneObj, event) {
       const card = document.getElementById(`${phoneKey}_alertCard`);
       const badge = document.getElementById(`${phoneKey}_alertBadge`);
       const sender = document.getElementById(`${phoneKey}_alertSender`);
       const msg = document.getElementById(`${phoneKey}_alertMsg`);
 
-      phoneObj.activeAlertSenderTopic = payload.senderTopicId;
+      phoneObj.activeAlertSenderTopic = event.senderTopicId;
 
       card.classList.remove('hidden');
-      sender.textContent = `From: ${payload.senderName}`;
-      msg.textContent = payload.ciphertext || payload.messageText || "Alert received!";
+      sender.textContent = `From: ${event.senderName}`;
+      msg.textContent = event.messageText || "Alert received!";
 
       // Clear any prior sound interval
       if (activeAlertIntervals[phoneKey]) {
         clearInterval(activeAlertIntervals[phoneKey]);
       }
 
-      if (payload.level === 'SOS') {
+      if (event.level === 'SOS') {
         badge.textContent = "🚨 SOS EMERGENCY ALERT";
         badge.className = "font-extrabold text-sm px-2 py-0.5 rounded bg-red-600 text-white";
         card.className = "p-4 rounded-xl border-2 shadow-lg space-y-2 siren-active";
@@ -398,10 +594,9 @@
       document.getElementById(`${phoneKey}_alertCard`).classList.add('hidden');
       logDevice(phoneKey, `🔕 Alarm silenced & acknowledged by user.`, "text-slate-300 font-bold");
 
-      // Purge active alert page from Firebase RTDB now that user acknowledged/dismissed
+      // Mark dismissed in PagerCoreEngine and purge active alert page from Firebase RTDB
       if (phoneObj.activeAlertMsgKey) {
-        if (!phoneObj.dismissedAlertKeys) phoneObj.dismissedAlertKeys = new Set();
-        phoneObj.dismissedAlertKeys.add(phoneObj.activeAlertMsgKey);
+        phoneObj.engine.markMessageDismissed(phoneObj.activeAlertMsgKey, phoneObj.activeAlertTimestamp || Date.now());
         const cleanTopic = phoneObj.topic.replace(/[^a-zA-Z0-9_-]/g, '_');
         db.ref(`channels/${cleanTopic}/${phoneObj.activeAlertMsgKey}`).remove().catch(() => {});
         phoneObj.activeAlertMsgKey = null;
@@ -410,12 +605,7 @@
       const targetTopic = phoneObj.activeAlertSenderTopic;
       if (targetTopic) {
         logDevice(phoneKey, `📤 Sending PAGE_ACK receipt back to sender topic...`, "text-blue-300");
-        const ackPacket = {
-          type: "PAGE_ACK",
-          senderName: phoneObj.name,
-          senderTopicId: phoneObj.topic,
-          timestamp: Date.now()
-        };
+        const ackPacket = phoneObj.engine.buildAckPayload(Date.now());
         await sendPushPayload(phoneKey, targetTopic, ackPacket, `Page Acknowledged by ${phoneObj.name}`, "4", "white_check_mark");
         phoneObj.activeAlertSenderTopic = null;
       }
@@ -502,14 +692,8 @@
 
       logDevice(senderKey, `🚨 Triggering ${level} alert (10s cooldown started)...`, isSos ? "text-red-400 font-bold" : "text-amber-400 font-bold");
 
-      const payload = {
-        type: "PAGE",
-        senderName: senderObj.name,
-        senderTopicId: senderObj.topic,
-        level: level,
-        timestamp: Date.now(),
-        ciphertext: isSos ? "EMERGENCY: Urgent assistance needed!" : "Hey look! Check your phone when free."
-      };
+      const text = isSos ? "EMERGENCY: Urgent assistance needed!" : "Hey look! Check your phone when free.";
+      const payload = senderObj.engine.buildPagePayload(targetTopic, level, text, Date.now());
 
       const success = await sendPushPayload(
         senderKey,
@@ -530,12 +714,7 @@
       initiator.contacts[target.topic] = { name: target.name, topicId: target.topic };
       renderContacts(initiatorKey, initiator);
 
-      const handshake = {
-        type: "PAIRING_HANDSHAKE",
-        senderName: initiator.name,
-        senderTopicId: initiator.topic,
-        timestamp: Date.now()
-      };
+      const handshake = initiator.engine.buildPairingPayload(false, Date.now());
 
       logDevice(initiatorKey, `   Transmitting PAIRING_HANDSHAKE packet...`, "text-indigo-300");
       await sendPushPayload(initiatorKey, target.topic, handshake, `Pairing Handshake from ${initiator.name}`, "4", "handshake");
@@ -549,12 +728,7 @@
       renderContacts('phoneA', phoneA);
       renderContacts('phoneB', phoneB);
 
-      const handshake = {
-        type: "PAIRING_HANDSHAKE_REPLY",
-        senderName: phoneA.name,
-        senderTopicId: phoneA.topic,
-        timestamp: Date.now()
-      };
+      const handshake = phoneA.engine.buildPairingPayload(true, Date.now());
       await sendPushPayload('phoneA', phoneB.topic, handshake, `Pairing Handshake from ${phoneA.name}`, "4", "handshake,white_check_mark");
     }
 
@@ -600,6 +774,7 @@
         const phoneObj = phoneKey === 'phoneA' ? phoneA : phoneB;
         const oldName = phoneObj.name;
         phoneObj.name = newName.trim() || (phoneKey === 'phoneA' ? "Dad" : "Daughter");
+        phoneObj.engine.myName = phoneObj.name;
         const headerId = phoneKey === 'phoneA' ? 'logHeaderA' : 'logHeaderB';
         document.getElementById(headerId).textContent = `Phone ${phoneKey === 'phoneA' ? 'A' : 'B'} (${phoneObj.name}) Log`;
         logDevice(phoneKey, `✏ Renamed from "${oldName}" to "${phoneObj.name}". Broadcasting NAME_UPDATE...`, "text-cyan-300 font-bold");
@@ -630,6 +805,8 @@
         topicB = 'pdh_sim_b_' + Math.random().toString(36).substring(2, 9);
         phoneA.topic = topicA;
         phoneB.topic = topicB;
+        phoneA.engine = new PagerCoreEngine(topicA, phoneA.name, relayBase, Date.now());
+        phoneB.engine = new PagerCoreEngine(topicB, phoneB.name, relayBase, Date.now());
         phoneA.contacts = {};
         phoneB.contacts = {};
         phoneA.activeAlertSenderTopic = null;

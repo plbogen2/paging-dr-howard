@@ -49,6 +49,7 @@ class FakePagerRepository : PagerRepository {
     private val dismissedKeys = mutableSetOf<String>()
     override fun isMessageDismissed(messageKey: String): Boolean = dismissedKeys.contains(messageKey)
     override fun markMessageDismissed(messageKey: String) { dismissedKeys.add(messageKey) }
+    override fun getDismissedMessageKeys(): Set<String> = dismissedKeys.toSet()
 }
 
 class MainViewModelTest {

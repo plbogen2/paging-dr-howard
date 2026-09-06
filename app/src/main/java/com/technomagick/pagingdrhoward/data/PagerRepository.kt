@@ -24,6 +24,7 @@ interface PagerRepository {
     fun saveLastDismissedAlertTimestamp(timestamp: Long)
     fun isMessageDismissed(messageKey: String): Boolean
     fun markMessageDismissed(messageKey: String)
+    fun getDismissedMessageKeys(): Set<String>
 }
 
 class DefaultPagerRepository(private val sharedPreferences: SharedPreferences) : PagerRepository {
@@ -165,6 +166,10 @@ class DefaultPagerRepository(private val sharedPreferences: SharedPreferences) :
         } else {
             sharedPreferences.edit().putStringSet(KEY_DISMISSED_MESSAGE_KEYS, current).apply()
         }
+    }
+
+    override fun getDismissedMessageKeys(): Set<String> {
+        return sharedPreferences.getStringSet(KEY_DISMISSED_MESSAGE_KEYS, emptySet()) ?: emptySet()
     }
 
     companion object {

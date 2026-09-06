@@ -1,24 +1,25 @@
-// shared-messaging/build.gradle.kts
 plugins {
-    kotlin('multiplatform')
-    id('org.jetbrains.kotlin.plugin.serialization') version '1.9.0'
+    alias(libs.plugins.kotlin.multiplatform)
+    alias(libs.plugins.kotlin.serialization)
+    alias(libs.plugins.android.library)
 }
 
 kotlin {
-    android()
+    androidTarget()
     js(IR) {
-        browser()
-        binaries.executable()
+        browser {
+            binaries.executable()
+        }
     }
     sourceSets {
         val commonMain by getting {
             dependencies {
-                implementation('org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3')
+                implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
             }
         }
         val commonTest by getting {
             dependencies {
-                implementation(kotlin('test'))
+                implementation(kotlin("test"))
             }
         }
         val jsMain by getting {}
@@ -28,6 +29,8 @@ kotlin {
 
 android {
     compileSdk = 34
-    namespace = 'com.example.sharedmessaging'
-    defaultConfig { minSdk = 26 }
+    namespace = "com.technomagick.pagingdrhoward.shared"
+    defaultConfig {
+        minSdk = 26
+    }
 }

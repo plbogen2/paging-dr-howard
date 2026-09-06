@@ -79,6 +79,7 @@ dependencies {
     implementation(libs.androidx.material.icons.extended)
 
     // Networking: OkHttp & SSE for real-time encrypted push transport (Zero Firebase / Zero Server)
+    implementation(project(":shared-messaging"))
     implementation(libs.okhttp)
     implementation("com.squareup.okhttp3:okhttp-sse:4.12.0")
 
