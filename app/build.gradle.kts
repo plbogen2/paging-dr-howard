@@ -1,7 +1,6 @@
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
-    alias(libs.plugins.google.services)
 }
 
 android {
@@ -86,8 +85,5 @@ dependencies {
 
     // Unit Testing
     testImplementation("junit:junit:4.13.2")
-    // Firebase
-    implementation(platform("com.google.firebase:firebase-bom:33.2.0"))
-    implementation("com.google.firebase:firebase-database-ktx")
 }
 
