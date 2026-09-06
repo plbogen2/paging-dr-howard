@@ -1,16 +1,17 @@
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
+    alias(libs.plugins.google.services)
 }
 
 android {
-    namespace = "com.example.pagingdrhoward"
+    namespace = "com.technomagick.pagingdrhoward"
     compileSdk = 34
 
     val buildNumber = System.getenv("BUILD_NUMBER")?.toIntOrNull() ?: 1001
 
     defaultConfig {
-        applicationId = "com.example.pagingdrhoward"
+        applicationId = "com.technomagick.pagingdrhoward"
         minSdk = 26
         targetSdk = 34
         versionCode = buildNumber
@@ -85,5 +86,8 @@ dependencies {
 
     // Unit Testing
     testImplementation("junit:junit:4.13.2")
-    testImplementation("org.json:json:20240303")
+    // Firebase
+    implementation(platform("com.google.firebase:firebase-bom:33.2.0"))
+    implementation("com.google.firebase:firebase-database-ktx")
+    implementation(project(":shared-messaging"))
 }

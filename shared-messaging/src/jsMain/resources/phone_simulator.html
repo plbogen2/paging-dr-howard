@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Paging Dr. Howard - Interactive Phone Simulator</title>
+  <script src="https://www.gstatic.com/antigravity/web/dev/tailwindcss.min.js"></script>
+  <!-- Fast, reliable client-side QR code generator -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <!-- HTML5 QR code video scanner -->
+  <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+  <!-- Firebase App and Realtime Database SDK -->
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+  <script src="./firebase-init.js"></script>
+  <style>
+    @keyframes pulse-siren {
+      0%, 100% { background-color: #fee2e2; border-color: #ef4444; }
+      50% { background-color: #ef4444; border-color: #991b1b; color: white; }
+    }
+    .siren-active {
+      animation: pulse-siren 0.8s infinite;
+    }
+    .qr-canvas-container canvas, .qr-canvas-container img {
+      margin: 0 auto;
+      border-radius: 8px;
+    }
+  </style>
+</head>
+<body class="bg-slate-100 text-slate-800 p-4 font-sans antialiased">
+  <div class="max-w-5xl mx-auto space-y-4">
+    <!-- Header -->
+    <div class="flex items-center justify-between bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+      <div>
+        <h1 class="text-xl font-extrabold text-slate-900 flex items-center gap-2">
+          <span>📟 Paging Dr. Howard</span>
+          <span class="text-xs px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 font-semibold">Live Web Simulator</span>
+        </h1>
+        <p class="text-xs text-slate-500 mt-1">
+          Complete test harness with QR Code Scanning, QR Code Generation, 10s cooldown, and Firebase Realtime Database.
+        </p>
+      </div>
+      <div class="flex items-center gap-3">
+<!-- Relay Server UI removed – using Firebase Cloud Messaging -->
+        <button id="resetAllBtn" class="text-xs bg-slate-200 hover:bg-slate-300 text-slate-700 px-3 py-1.5 rounded-lg font-medium transition">
+          Reset Simulation
+        </button>
+      </div>
+    </div>
+
+    <!-- Quick Action Bar -->
+    <div class="bg-amber-50 border border-amber-200 rounded-lg p-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 text-xs text-amber-900">
+      <div class="flex items-center gap-2">
+        <span class="text-base">📸</span>
+        <span><b>QR Pairing Active:</b> Open your Android phone's camera to scan the simulator's QR code, or click <b>"📷 Scan QR Code"</b> to scan your phone's screen!</span>
+      </div>
+      <button id="oneClickPairBtn" class="bg-amber-600 hover:bg-amber-700 text-white font-bold px-3 py-1.5 rounded shadow transition shrink-0">
+        ⚡ 1-Click Mutual Pair (A &harr; B)
+      </button>
+    </div>
+
+    <!-- Independent Device Logs Section -->
+    <div class="space-y-2">
+      <div class="flex items-center justify-between text-xs text-slate-500 font-bold px-1">
+        <span>📟 Independent Device Wire Logs (SSE Streams &amp; Outgoing Packets)</span>
+        <button onclick="clearLogs()" class="text-[10px] bg-slate-800 hover:bg-slate-700 text-slate-300 px-2 py-0.5 rounded transition">Clear Logs 🧹</button>
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <!-- Phone A Terminal -->
+        <div class="bg-slate-900 rounded-xl p-3 border border-slate-700 shadow flex flex-col h-52 font-mono text-[11px]">
+          <div class="flex justify-between items-center pb-2 mb-2 border-b border-slate-800">
+            <span class="text-blue-400 font-bold flex items-center gap-1.5">
+              <span>📱</span> <span id="logHeaderA">Phone A (Dad) Log</span>
+            </span>
+            <span id="logTopicA" class="text-[9px] text-slate-500 truncate max-w-[160px]">topic: ...</span>
+          </div>
+          <div id="phoneA_log" class="flex-1 overflow-y-auto space-y-1 text-slate-300">
+            <div class="text-slate-600">// Phone A inbound SSE stream and outbound broadcasts...</div>
+          </div>
+        </div>
+
+        <!-- Phone B Terminal -->
+        <div class="bg-slate-900 rounded-xl p-3 border border-slate-700 shadow flex flex-col h-52 font-mono text-[11px]">
+          <div class="flex justify-between items-center pb-2 mb-2 border-b border-slate-800">
+            <span class="text-purple-400 font-bold flex items-center gap-1.5">
+              <span>📱</span> <span id="logHeaderB">Phone B (Daughter) Log</span>
+            </span>
+            <span id="logTopicB" class="text-[9px] text-slate-500 truncate max-w-[160px]">topic: ...</span>
+          </div>
+          <div id="phoneB_log" class="flex-1 overflow-y-auto space-y-1 text-slate-300">
+            <div class="text-slate-600">// Phone B inbound SSE stream and outbound broadcasts...</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Dual Virtual Devices -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+
+      <!-- ================= PHONE A (DAD) ================= -->
+      <div class="bg-white rounded-2xl border-4 border-slate-700 shadow-xl overflow-hidden flex flex-col min-h-[700px]">
+        <!-- Top phone status bar -->
+        <div class="bg-slate-800 text-slate-300 px-4 py-1.5 text-[10px] flex justify-between items-center font-mono">
+          <span>Phone A &bull; Dad</span>
+          <span id="phoneA_status" class="text-emerald-400 font-bold">🟢 Connected</span>
+        </div>
+        <!-- App Header -->
+        <div class="bg-red-700 text-white px-4 py-2.5 shadow flex items-center justify-between">
+          <div class="font-bold text-sm">Paging Dr. Howard 📟</div>
+          <button onclick="copySimulatorPairingCode('phoneA')" class="text-[10px] bg-red-900 hover:bg-red-950 px-2 py-1 rounded text-white font-mono flex items-center gap-1 transition" title="Copy Pairing Code to paste into Android app">
+            <span>📋 Copy Pairing Code</span>
+          </button>
+        </div>
+
+        <!-- Phone A Screen Content -->
+        <div class="p-4 flex-1 overflow-y-auto space-y-3 bg-slate-50 text-xs">
+          <!-- Setup Info Box -->
+          <div class="bg-white p-3 rounded-lg border border-slate-200 shadow-sm space-y-1">
+            <div class="flex justify-between items-center">
+              <span class="font-bold text-slate-700">Display Name:</span>
+              <input id="phoneA_name" type="text" value="Dad" class="border px-2 py-0.5 rounded text-xs font-bold text-slate-800 w-28 text-right bg-slate-50">
+            </div>
+            <div class="flex justify-between items-center text-[10px] text-slate-500 font-mono">
+              <span class="truncate" id="phoneA_topic">Topic: pdh_sim_a_...</span>
+              <button onclick="navigator.clipboard.writeText(phoneA.topic); alert('Copied Phone A Topic ID: ' + phoneA.topic)" class="text-blue-600 hover:underline shrink-0 ml-1">Copy</button>
+            </div>
+          </div>
+
+          <!-- Pairing & QR Section -->
+          <div class="bg-white p-3 rounded-lg border border-slate-200 shadow-sm space-y-2">
+            <div class="font-bold text-slate-700 flex justify-between items-center">
+              <span>📷 Pairing &amp; QR Codes</span>
+              <span class="text-[10px] bg-emerald-100 text-emerald-800 font-semibold px-1.5 py-0.5 rounded">Scan Ready</span>
+            </div>
+            
+            <div class="grid grid-cols-2 gap-2">
+              <button onclick="openQrModal('phoneA')" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-1.5 px-2 rounded-lg flex items-center justify-center gap-1.5 transition">
+                <span>📱</span> <span>Show QR Code</span>
+              </button>
+              <button onclick="openScannerModal('phoneA')" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-1.5 px-2 rounded-lg flex items-center justify-center gap-1.5 transition">
+                <span>📷</span> <span>Scan QR Code</span>
+              </button>
+            </div>
+
+            <button id="phoneA_pairBtn" class="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold py-1.5 rounded-lg flex items-center justify-center gap-1.5 transition border border-slate-300">
+              <span>🔄</span> <span>Direct Pair with Phone B (Simulator)</span>
+            </button>
+
+            <!-- Custom Android Input Box (Collapsible) -->
+            <div class="pt-2 border-t border-slate-100 space-y-1.5">
+              <div class="flex justify-between items-center text-[10px] text-slate-500 font-medium">
+                <span>Or paste Android Topic ID / Pairing Code:</span>
+              </div>
+              <input id="phoneA_customTopic" type="text" placeholder="e.g. pdh_a1b2c3d4 or PAGING_PAIR:{...}" class="w-full border px-2 py-1 rounded text-[11px] font-mono bg-slate-50 focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-500">
+              <div class="flex gap-2">
+                <input id="phoneA_customName" type="text" placeholder="Contact Name" value="My Android Phone" class="flex-1 border px-2 py-1 rounded text-[11px] bg-slate-50 focus:bg-white">
+                <button onclick="addExternalContact('phoneA')" class="bg-blue-600 hover:bg-blue-700 text-white font-bold px-3 py-1 rounded text-[11px] transition shrink-0">
+                  Add Phone
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Address Book & Paging -->
+          <div class="space-y-2">
+            <div class="font-bold text-slate-700 flex justify-between">
+              <span>Paired Family Contacts</span>
+              <span id="phoneA_contactCount" class="text-slate-400">0 paired</span>
+            </div>
+            <div id="phoneA_contactsList" class="space-y-2">
+              <div class="text-center py-6 text-slate-400 bg-white rounded-lg border border-dashed border-slate-300">
+                No family paired yet.<br>Tap "Show QR Code" to scan with your phone!
+              </div>
+            </div>
+          </div>
+
+          <!-- Incoming Alert Card on Phone A -->
+          <div id="phoneA_alertCard" class="hidden p-4 rounded-xl border-2 shadow-lg space-y-2">
+            <div class="flex items-center justify-between">
+              <span id="phoneA_alertBadge" class="font-extrabold text-sm px-2 py-0.5 rounded bg-red-600 text-white">🚨 SOS ALERT</span>
+              <span class="text-[10px] text-slate-500 font-mono">Just Now</span>
+            </div>
+            <div id="phoneA_alertSender" class="font-bold text-sm text-slate-900">From: Daughter</div>
+            <div id="phoneA_alertMsg" class="text-xs text-slate-700">Urgent assistance needed!</div>
+            <button onclick="dismissAlert('phoneA')" class="w-full mt-2 bg-slate-800 text-white py-1.5 rounded-lg font-bold">
+              Dismiss Alarm 🔕
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ================= PHONE B (DAUGHTER) ================= -->
+      <div class="bg-white rounded-2xl border-4 border-slate-700 shadow-xl overflow-hidden flex flex-col min-h-[700px]">
+        <!-- Top phone status bar -->
+        <div class="bg-slate-800 text-slate-300 px-4 py-1.5 text-[10px] flex justify-between items-center font-mono">
+          <span>Phone B &bull; Daughter</span>
+          <span id="phoneB_status" class="text-emerald-400 font-bold">🟢 Connected</span>
+        </div>
+        <!-- App Header -->
+        <div class="bg-red-700 text-white px-4 py-2.5 shadow flex items-center justify-between">
+          <div class="font-bold text-sm">Paging Dr. Howard 📟</div>
+          <button onclick="copySimulatorPairingCode('phoneB')" class="text-[10px] bg-red-900 hover:bg-red-950 px-2 py-1 rounded text-white font-mono flex items-center gap-1 transition" title="Copy Pairing Code to paste into Android app">
+            <span>📋 Copy Pairing Code</span>
+          </button>
+        </div>
+
+        <!-- Phone B Screen Content -->
+        <div class="p-4 flex-1 overflow-y-auto space-y-3 bg-slate-50 text-xs">
+          <!-- Setup Info Box -->
+          <div class="bg-white p-3 rounded-lg border border-slate-200 shadow-sm space-y-1">
+            <div class="flex justify-between items-center">
+              <span class="font-bold text-slate-700">Display Name:</span>
+              <input id="phoneB_name" type="text" value="Daughter" class="border px-2 py-0.5 rounded text-xs font-bold text-slate-800 w-28 text-right bg-slate-50">
+            </div>
+            <div class="flex justify-between items-center text-[10px] text-slate-500 font-mono">
+              <span class="truncate" id="phoneB_topic">Topic: pdh_sim_b_...</span>
+              <button onclick="navigator.clipboard.writeText(phoneB.topic); alert('Copied Phone B Topic ID: ' + phoneB.topic)" class="text-blue-600 hover:underline shrink-0 ml-1">Copy</button>
+            </div>
+          </div>
+
+          <!-- Pairing & QR Section -->
+          <div class="bg-white p-3 rounded-lg border border-slate-200 shadow-sm space-y-2">
+            <div class="font-bold text-slate-700 flex justify-between items-center">
+              <span>📷 Pairing &amp; QR Codes</span>
+              <span class="text-[10px] bg-emerald-100 text-emerald-800 font-semibold px-1.5 py-0.5 rounded">Scan Ready</span>
+            </div>
+            
+            <div class="grid grid-cols-2 gap-2">
+              <button onclick="openQrModal('phoneB')" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-1.5 px-2 rounded-lg flex items-center justify-center gap-1.5 transition">
+                <span>📱</span> <span>Show QR Code</span>
+              </button>
+              <button onclick="openScannerModal('phoneB')" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-1.5 px-2 rounded-lg flex items-center justify-center gap-1.5 transition">
+                <span>📷</span> <span>Scan QR Code</span>
+              </button>
+            </div>
+
+            <button id="phoneB_pairBtn" class="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold py-1.5 rounded-lg flex items-center justify-center gap-1.5 transition border border-slate-300">
+              <span>🔄</span> <span>Direct Pair with Phone A (Simulator)</span>
+            </button>
+
+            <!-- Custom Android Input Box (Collapsible) -->
+            <div class="pt-2 border-t border-slate-100 space-y-1.5">
+              <div class="flex justify-between items-center text-[10px] text-slate-500 font-medium">
+                <span>Or paste Android Topic ID / Pairing Code:</span>
+              </div>
+              <input id="phoneB_customTopic" type="text" placeholder="e.g. pdh_a1b2c3d4 or PAGING_PAIR:{...}" class="w-full border px-2 py-1 rounded text-[11px] font-mono bg-slate-50 focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-500">
+              <div class="flex gap-2">
+                <input id="phoneB_customName" type="text" placeholder="Contact Name" value="My Android Phone" class="flex-1 border px-2 py-1 rounded text-[11px] bg-slate-50 focus:bg-white">
+                <button onclick="addExternalContact('phoneB')" class="bg-blue-600 hover:bg-blue-700 text-white font-bold px-3 py-1 rounded text-[11px] transition shrink-0">
+                  Add Phone
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Address Book & Paging -->
+          <div class="space-y-2">
+            <div class="font-bold text-slate-700 flex justify-between">
+              <span>Paired Family Contacts</span>
+              <span id="phoneB_contactCount" class="text-slate-400">0 paired</span>
+            </div>
+            <div id="phoneB_contactsList" class="space-y-2">
+              <div class="text-center py-6 text-slate-400 bg-white rounded-lg border border-dashed border-slate-300">
+                No family paired yet.<br>Tap "Show QR Code" to scan with your phone!
+              </div>
+            </div>
+          </div>
+
+          <!-- Incoming Alert Card on Phone B -->
+          <div id="phoneB_alertCard" class="hidden p-4 rounded-xl border-2 shadow-lg space-y-2">
+            <div class="flex items-center justify-between">
+              <span id="phoneB_alertBadge" class="font-extrabold text-sm px-2 py-0.5 rounded bg-red-600 text-white">🚨 SOS ALERT</span>
+              <span class="text-[10px] text-slate-500 font-mono">Just Now</span>
+            </div>
+            <div id="phoneB_alertSender" class="font-bold text-sm text-slate-900">From: Dad</div>
+            <div id="phoneB_alertMsg" class="text-xs text-slate-700">Urgent assistance needed!</div>
+            <button onclick="dismissAlert('phoneB')" class="w-full mt-2 bg-slate-800 text-white py-1.5 rounded-lg font-bold">
+              Dismiss Alarm 🔕
+            </button>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- QR Code Display Modal -->
+  <div id="qrModal" class="fixed inset-0 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center hidden z-50 p-4">
+    <div class="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl space-y-4 text-center">
+      <div class="flex justify-between items-center border-b pb-2">
+        <h3 class="font-extrabold text-slate-900 text-base" id="qrModalTitle">Device Pairing QR Code</h3>
+        <button onclick="closeQrModal()" class="text-slate-400 hover:text-slate-600 text-lg font-bold">&times;</button>
+      </div>
+      <p class="text-xs text-slate-600">
+        Scan this QR Code with your <b>Paging Dr. Howard</b> Android app (under <i>Scan Family Member's QR Code</i>) to link immediately:
+      </p>
+      <div class="bg-white p-4 rounded-xl border-2 border-slate-200 inline-block shadow-inner">
+        <div id="qrcodeContainer" class="qr-canvas-container flex justify-center"></div>
+      </div>
+      <div class="space-y-1 text-left bg-slate-50 p-2.5 rounded-lg border border-slate-200">
+        <div class="text-[10px] text-slate-400 font-bold uppercase">Pairing Code Payload:</div>
+        <div id="qrPayloadText" class="text-[9px] font-mono text-slate-600 break-all select-all"></div>
+      </div>
+      <div class="flex gap-2">
+        <button onclick="copyQrPayload()" class="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold py-2 rounded-lg text-xs transition">
+          📋 Copy Code
+        </button>
+        <button onclick="closeQrModal()" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 rounded-lg text-xs transition">
+          Done
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- QR Code Scanner Modal (Webcam / Camera) -->
+  <div id="scannerModal" class="fixed inset-0 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center hidden z-50 p-4">
+    <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+      <div class="flex justify-between items-center border-b pb-2">
+        <h3 class="font-extrabold text-slate-900 text-base" id="scannerModalTitle">Scan Family QR Code</h3>
+        <button onclick="closeScannerModal()" class="text-slate-400 hover:text-slate-600 text-lg font-bold">&times;</button>
+      </div>
+      <p class="text-xs text-slate-600">
+        Hold your Android phone's <b>"Your Device Pairing QR Code"</b> screen in front of your computer webcam to pair:
+      </p>
+      
+      <div id="qr-reader" class="rounded-xl overflow-hidden border-2 border-slate-300 bg-black min-h-[260px]"></div>
+
+      <div class="flex items-center justify-between pt-2">
+        <span class="text-[11px] text-slate-500">Camera active &bull; Auto-detecting...</span>
+        <button onclick="closeScannerModal()" class="bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold px-4 py-1.5 rounded-lg text-xs transition">
+          Cancel
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script src="./simulator.js"></script>
+</body>
+</html>

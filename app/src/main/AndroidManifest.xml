@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:tools="http://schemas.android.com/tools">
+    xmlns:tools="http://schemas.android.com/tools"
+    package="com.technomagick.pagingdrhoward">
 
     <!-- Permissions required for DND override, full volume alarms, screen wake, push listener, and QR scanner -->
     <uses-permission android:name="android.permission.ACCESS_NOTIFICATION_POLICY" />
@@ -57,7 +58,7 @@
             android:exported="false"
             android:foregroundServiceType="mediaPlayback" />
 
-        <!-- Real-Time Push Listener Service (Zero Firebase / Zero Server) -->
+        <!-- Real-Time Push Listener Service (Firebase Realtime Database) -->
         <service
             android:name=".service.PushListenerService"
             android:enabled="true"
