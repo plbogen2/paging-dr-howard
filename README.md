@@ -6,9 +6,8 @@ An Android emergency paging system designed exclusively for family members to pa
 
 ## 🌟 Key Features
 
-1. **Zero-Server & Zero-Firebase**:
-   - No Firebase project setup required.
-   - No backend hosting or server maintenance.
+1. **High-Reliability Direct Push Transport (Firebase RTDB)**:
+   - High-throughput SSE streaming & direct REST messaging without intermediary notification servers or third-party quota limits.
    - Works seamlessly on standard Android phones, de-Googled devices, and Amazon Kindle Fire (Fire OS) tablets over both Wi-Fi and 4G/5G cellular data.
 
 2. **In-App GitHub Auto-Updater**:
@@ -50,4 +49,4 @@ An Android emergency paging system designed exclusively for family members to pa
 
 ## 🔒 Privacy & Architecture
 - **Zero Cloud Storage**: Contacts, encryption keys, and messages are stored locally on-device.
-- **Relay Privacy**: Public push transport (`ntfy.sh`) only transports random encrypted bytes and never sees plaintext, contacts, or user identities.
+- **Relay Privacy**: Direct RTDB transport only carries randomly addressed end-to-end encrypted payloads and never stores plaintext, contacts, or user identities.
