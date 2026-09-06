@@ -50,6 +50,10 @@ class FakePagerRepository : PagerRepository {
     override fun isMessageDismissed(messageKey: String): Boolean = dismissedKeys.contains(messageKey)
     override fun markMessageDismissed(messageKey: String) { dismissedKeys.add(messageKey) }
     override fun getDismissedMessageKeys(): Set<String> = dismissedKeys.toSet()
+
+    private val contactAcks = mutableMapOf<String, Long>()
+    override fun recordContactAck(topicId: String, timestamp: Long) { contactAcks[topicId] = timestamp }
+    override fun getLastContactAck(topicId: String): Long = contactAcks[topicId] ?: 0L
 }
 
 class MainViewModelTest {

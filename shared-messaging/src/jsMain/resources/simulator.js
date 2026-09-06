@@ -536,6 +536,8 @@ class PagerCoreEngine {
           logDevice(recipientKey, `   Message: "${event.messageText}"`, "text-slate-300");
           recipientObj.activeAlertMsgKey = event.messageKey;
           recipientObj.activeAlertTimestamp = event.timestamp;
+          // Immediately purge received page from Firebase RTDB
+          purgeMsg(event.messageKey);
           triggerAlertUI(recipientKey, recipientObj, event);
           break;
 
@@ -543,6 +545,11 @@ class PagerCoreEngine {
           logDevice(recipientKey, `✅ [PAGE ACKNOWLEDGED]`, "text-emerald-400 font-extrabold text-sm");
           logDevice(recipientKey, `   "${event.senderName}" acknowledged and silenced your alarm!`, "text-emerald-300 font-bold");
           purgeMsg(event.messageKey);
+          if (recipientObj.contacts[event.senderTopicId]) {
+            recipientObj.contacts[event.senderTopicId].lastAck = Date.now();
+            saveSimState();
+            renderContacts(recipientKey, recipientObj);
+          }
           break;
 
         case "PAIRING_RECEIVED":
@@ -674,6 +681,7 @@ class PagerCoreEngine {
       contacts.forEach(c => {
         const cd = (cooldowns[phoneKey] && cooldowns[phoneKey][c.topicId]) || 0;
         const isCoolingDown = cd > 0;
+        const isRecentlyAcked = c.lastAck && (Date.now() - c.lastAck < 600000);
 
         const item = document.createElement('div');
         item.className = "bg-white p-3 rounded-xl border border-slate-200 shadow-sm space-y-2";
@@ -695,8 +703,11 @@ class PagerCoreEngine {
              </button>`;
 
         item.innerHTML = `
-          <div class="flex justify-between items-center">
-            <span class="font-extrabold text-slate-800 text-sm">👤 ${c.name}</span>
+          <div class="flex justify-between items-start">
+            <div>
+              <div class="font-extrabold text-slate-800 text-sm">👤 ${c.name}</div>
+              ${isRecentlyAcked ? '<div class="text-[10px] text-emerald-600 font-bold flex items-center gap-1 mt-0.5"><span>✔</span> <span>Page Acknowledged</span></div>' : ''}
+            </div>
             <span class="text-[9px] bg-slate-100 text-slate-500 font-mono px-1.5 py-0.5 rounded truncate max-w-[130px]">${c.topicId}</span>
           </div>
           <div class="grid grid-cols-2 gap-2 pt-1">

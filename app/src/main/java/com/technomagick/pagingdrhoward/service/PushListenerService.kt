@@ -64,6 +64,12 @@ class PushListenerService : Service() {
             is com.technomagick.pagingdrhoward.shared.EngineEvent.AlertTriggered -> {
                 Log.i(TAG, "Engine alert triggered from ${event.senderName} (${event.level.code})")
 
+                // Immediately drop/purge the received page from Firebase RTDB
+                val key = event.messageKey
+                if (!key.isNullOrBlank()) {
+                    PushSender.deleteMessage(repository.getRelayServerUrl(), repository.getMyTopicId(), key)
+                }
+
                 if (!shouldDispatchAlert(event.messageKey, event.senderTopicId, event.timestamp)) {
                     Log.d(TAG, "Ignoring duplicate alert dispatch for key: ${event.messageKey} / topic: ${event.senderTopicId}")
                     return
@@ -88,20 +94,13 @@ class PushListenerService : Service() {
                 }
             }
             is com.technomagick.pagingdrhoward.shared.EngineEvent.PageAckReceived -> {
-                Log.i(TAG, "Engine received PAGE_ACK from ${event.senderName}")
+                Log.i(TAG, "Engine received PAGE_ACK from ${event.senderName} (${event.senderTopicId})")
                 val key = event.messageKey
                 if (!key.isNullOrBlank()) {
                     PushSender.deleteMessage(repository.getRelayServerUrl(), repository.getMyTopicId(), key)
                 }
-                val ackNotification = NotificationCompat.Builder(this, DndHelper.CHANNEL_STATUS_ID)
-                    .setSmallIcon(android.R.drawable.ic_dialog_info)
-                    .setContentTitle("Page Acknowledged ✔")
-                    .setContentText("${event.senderName} confirmed receipt of your page.")
-                    .setPriority(NotificationCompat.PRIORITY_HIGH)
-                    .setAutoCancel(true)
-                    .build()
-                val notificationManager = getSystemService(NOTIFICATION_SERVICE) as android.app.NotificationManager
-                notificationManager.notify((System.currentTimeMillis() % 10000).toInt(), ackNotification)
+                // Record acknowledgment silently for in-app UI display without chime or notification
+                repository.recordContactAck(event.senderTopicId, System.currentTimeMillis())
             }
             is com.technomagick.pagingdrhoward.shared.EngineEvent.PairingReceived -> {
                 Log.i(TAG, "Engine received pairing from ${event.senderName}")

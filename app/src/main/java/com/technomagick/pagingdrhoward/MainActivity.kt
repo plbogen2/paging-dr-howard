@@ -49,7 +49,9 @@ class MainActivity : ComponentActivity() {
 
     private lateinit var viewModel: MainViewModel
     private val prefListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
-        if (key == DefaultPagerRepository.KEY_PAIRED_CONTACTS) {
+        if (key == DefaultPagerRepository.KEY_PAIRED_CONTACTS ||
+            key == DefaultPagerRepository.KEY_LAST_ACK_UPDATE ||
+            (key != null && key.startsWith(DefaultPagerRepository.KEY_PREFIX_LAST_ACK))) {
             runOnUiThread {
                 viewModel.loadSettings()
             }
@@ -415,7 +417,14 @@ fun FamilyContactsScreen(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(contact.name, fontWeight = FontWeight.Bold, fontSize = 20.sp, color = Color(0xFFE65100))
+                            Column {
+                                Text(contact.name, fontWeight = FontWeight.Bold, fontSize = 20.sp, color = Color(0xFFE65100))
+                                val lastAck = uiState.lastAckedContacts[contact.topicId] ?: 0L
+                                val isRecentlyAcked = (System.currentTimeMillis() - lastAck) < 600_000L // within 10 mins
+                                if (isRecentlyAcked) {
+                                    Text("✔ Page Acknowledged", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF2E7D32))
+                                }
+                            }
                             IconButton(onClick = { onDeleteContact(contact.id) }) {
                                 Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color.Gray)
                             }

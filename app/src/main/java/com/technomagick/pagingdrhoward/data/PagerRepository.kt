@@ -25,6 +25,8 @@ interface PagerRepository {
     fun isMessageDismissed(messageKey: String): Boolean
     fun markMessageDismissed(messageKey: String)
     fun getDismissedMessageKeys(): Set<String>
+    fun recordContactAck(topicId: String, timestamp: Long)
+    fun getLastContactAck(topicId: String): Long
 }
 
 class DefaultPagerRepository(private val sharedPreferences: SharedPreferences) : PagerRepository {
@@ -172,6 +174,19 @@ class DefaultPagerRepository(private val sharedPreferences: SharedPreferences) :
         return sharedPreferences.getStringSet(KEY_DISMISSED_MESSAGE_KEYS, emptySet()) ?: emptySet()
     }
 
+    override fun recordContactAck(topicId: String, timestamp: Long) {
+        if (topicId.isBlank()) return
+        sharedPreferences.edit()
+            .putLong(KEY_PREFIX_LAST_ACK + topicId, timestamp)
+            .putLong(KEY_LAST_ACK_UPDATE, timestamp)
+            .apply()
+    }
+
+    override fun getLastContactAck(topicId: String): Long {
+        if (topicId.isBlank()) return 0L
+        return sharedPreferences.getLong(KEY_PREFIX_LAST_ACK + topicId, 0L)
+    }
+
     companion object {
         const val PREF_NAME = "pager_prefs"
         const val KEY_MY_TOPIC_ID = "my_topic_id"
@@ -184,6 +199,8 @@ class DefaultPagerRepository(private val sharedPreferences: SharedPreferences) :
         const val KEY_LOG_ENABLED = "log_enabled"
         const val KEY_LAST_DISMISSED_ALERT_TIMESTAMP = "last_dismissed_alert_timestamp"
         const val KEY_DISMISSED_MESSAGE_KEYS = "dismissed_message_keys"
+        const val KEY_PREFIX_LAST_ACK = "last_ack_"
+        const val KEY_LAST_ACK_UPDATE = "last_ack_update_signal"
         const val DEFAULT_RELAY_SERVER_URL = "https://paging-dr-howard-default-rtdb.firebaseio.com/"
     }
 

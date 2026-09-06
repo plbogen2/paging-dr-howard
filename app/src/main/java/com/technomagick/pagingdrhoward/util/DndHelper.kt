@@ -10,7 +10,7 @@ import android.provider.Settings
 import android.util.Log
 
 object DndHelper {
-    const val CHANNEL_EMERGENCY_ID = "emergency_page_channel"
+    const val CHANNEL_EMERGENCY_ID = "emergency_page_channel_v2"
     const val CHANNEL_STATUS_ID = "pager_status_channel"
     const val CHANNEL_NAME = "Emergency Pages"
     private const val TAG = "DndHelper"
@@ -55,13 +55,20 @@ object DndHelper {
     }
 
     /**
-     * Registers both the emergency alarm notification channel (with USAGE_ALARM sound)
-     * and the silent background listener status channel (completely silent with no sound).
+     * Registers both the emergency alarm notification channel (silent, visual only; AudioPlayer handles sound)
+     * and the silent background listener status channel.
      */
     fun createEmergencyNotificationChannel(context: Context) {
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
+
+                // Clean up legacy noisy channel if present
+                try {
+                    notificationManager.deleteNotificationChannel("emergency_page_channel")
+                } catch (e: Throwable) {
+                    // Ignored
+                }
 
                 // 1. Silent Background Status Channel for PushListenerService
                 val statusChannel = NotificationChannel(
@@ -77,15 +84,7 @@ object DndHelper {
                 notificationManager.createNotificationChannel(statusChannel)
 
                 // 2. High-Priority Emergency Alert Channel for EmergencyPagerService
-                val audioAttributes = try {
-                    AudioAttributes.Builder()
-                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                        .setUsage(AudioAttributes.USAGE_ALARM)
-                        .build()
-                } catch (e: Throwable) {
-                    null
-                }
-
+                // Notification sound is explicitly null because AudioPlayer handles the MediaPlayer alarm directly.
                 val emergencyChannel = NotificationChannel(
                     CHANNEL_EMERGENCY_ID,
                     CHANNEL_NAME,
@@ -97,9 +96,7 @@ object DndHelper {
                     } catch (e: Throwable) {
                         Log.w(TAG, "setBypassDnd not supported on this OS", e)
                     }
-                    if (audioAttributes != null) {
-                        setSound(Settings.System.DEFAULT_ALARM_ALERT_URI, audioAttributes)
-                    }
+                    setSound(null, null)
                     enableVibration(true)
                     vibrationPattern = longArrayOf(0, 500, 200, 500, 200, 500)
                 }
