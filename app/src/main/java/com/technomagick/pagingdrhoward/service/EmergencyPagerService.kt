@@ -13,6 +13,8 @@ import com.technomagick.pagingdrhoward.util.AudioPlayer
 import com.technomagick.pagingdrhoward.util.DndHelper
 
 class EmergencyPagerService : Service() {
+    private var currentActiveMessageKey: String? = null
+    private var lastAlarmTriggerTimeMs: Long = 0L
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -20,6 +22,8 @@ class EmergencyPagerService : Service() {
         val action = intent?.action
 
         if (action == ACTION_STOP_ALARM) {
+            currentActiveMessageKey = null
+            lastAlarmTriggerTimeMs = 0L
             AudioPlayer.stopEmergencyAlarm(this)
             stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
@@ -33,6 +37,18 @@ class EmergencyPagerService : Service() {
         val timestamp = intent?.getLongExtra("EXTRA_TIMESTAMP", 0L) ?: 0L
         val messageKey = intent?.getStringExtra("EXTRA_MESSAGE_KEY")
         val pageLevel = PageLevel.fromCode(levelCode)
+
+        val now = System.currentTimeMillis()
+        val isSameActiveMessage = !messageKey.isNullOrBlank() && messageKey == currentActiveMessageKey
+        val isRapidDuplicate = (now - lastAlarmTriggerTimeMs) < 3000L && currentActiveMessageKey != null
+
+        if (isSameActiveMessage || isRapidDuplicate) {
+            android.util.Log.d("EmergencyPagerService", "Ignoring duplicate alarm trigger for key: $messageKey")
+            return START_STICKY
+        }
+
+        currentActiveMessageKey = messageKey
+        lastAlarmTriggerTimeMs = now
 
         DndHelper.createEmergencyNotificationChannel(this)
 

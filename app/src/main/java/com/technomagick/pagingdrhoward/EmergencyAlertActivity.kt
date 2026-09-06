@@ -42,12 +42,24 @@ class EmergencyAlertActivity : ComponentActivity() {
             )
         }
 
-        val senderName = intent.getStringExtra("EXTRA_SENDER") ?: "Family Member"
-        val senderTopic = intent.getStringExtra("EXTRA_SENDER_TOPIC") ?: ""
-        val messageText = intent.getStringExtra("EXTRA_MESSAGE") ?: "URGENT: Please respond immediately!"
-        val levelCode = intent.getStringExtra("EXTRA_LEVEL")
-        val timestamp = intent.getLongExtra("EXTRA_TIMESTAMP", 0L)
-        val messageKey = intent.getStringExtra("EXTRA_MESSAGE_KEY") ?: ""
+        renderAlert(intent)
+    }
+
+    override fun onNewIntent(newIntent: Intent?) {
+        super.onNewIntent(newIntent)
+        newIntent?.let {
+            setIntent(it)
+            renderAlert(it)
+        }
+    }
+
+    private fun renderAlert(currentIntent: Intent) {
+        val senderName = currentIntent.getStringExtra("EXTRA_SENDER") ?: "Family Member"
+        val senderTopic = currentIntent.getStringExtra("EXTRA_SENDER_TOPIC") ?: ""
+        val messageText = currentIntent.getStringExtra("EXTRA_MESSAGE") ?: "URGENT: Please respond immediately!"
+        val levelCode = currentIntent.getStringExtra("EXTRA_LEVEL")
+        val timestamp = currentIntent.getLongExtra("EXTRA_TIMESTAMP", 0L)
+        val messageKey = currentIntent.getStringExtra("EXTRA_MESSAGE_KEY") ?: ""
         val pageLevel = PageLevel.fromCode(levelCode)
 
         setContent {

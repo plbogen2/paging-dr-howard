@@ -177,8 +177,12 @@ class PagerCoreEngine(
             return if (!messageKey.isNullOrBlank()) EngineEvent.PurgeRequired(messageKey) else EngineEvent.Ignored
         }
 
-        // Rule 6: Signature deduplication
-        val dedupeKey = if (signature.isNotBlank()) signature else "$senderTopicId:$timestamp"
+        // Rule 6: Signature & message key deduplication
+        val dedupeKey = when {
+            signature.isNotBlank() -> signature
+            !messageKey.isNullOrBlank() -> "$senderTopicId:$messageKey"
+            else -> "$senderTopicId:$timestamp"
+        }
         if (processedSignatures.contains(dedupeKey)) {
             return EngineEvent.Ignored
         }

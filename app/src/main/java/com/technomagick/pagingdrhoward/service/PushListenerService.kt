@@ -30,6 +30,7 @@ class PushListenerService : Service() {
     private var currentServerIndex = 0
     private var serviceStartTimeMs = System.currentTimeMillis()
     private var isConnected = false
+    private var isConnecting = false
     private var currentListeningTopic: String? = null
     private var currentListeningServer: String? = null
 
@@ -171,14 +172,20 @@ class PushListenerService : Service() {
         val base = serverCandidates[currentServerIndex % serverCandidates.size]
         val cleanTopic = myTopicId.trim().replace(Regex("^https?:/+[^/]+/"), "").replace(Regex("[^a-zA-Z0-9_-]"), "_")
 
-        // If already connected and listening to this exact server and topic, avoid tearing down stream
-        if (isConnected && eventSource != null && currentListeningTopic == cleanTopic && currentListeningServer == base) {
-            Log.d(TAG, "Already connected to push stream on $base ($cleanTopic), ignoring redundant startSseListener call")
+        // If already connecting or connected to this exact server and topic, avoid tearing down stream
+        if ((isConnected || isConnecting) && eventSource != null && currentListeningTopic == cleanTopic && currentListeningServer == base) {
+            Log.d(TAG, "Already connecting or connected to push stream on $base ($cleanTopic), ignoring redundant startSseListener call")
             return
         }
 
-        eventSource?.cancel()
+        try {
+            eventSource?.cancel()
+        } catch (e: Exception) {
+            // Ignored
+        }
+        eventSource = null
         isConnected = false
+        isConnecting = true
         currentListeningTopic = cleanTopic
         currentListeningServer = base
 
@@ -199,6 +206,7 @@ class PushListenerService : Service() {
             override fun onOpen(eventSource: EventSource, response: Response) {
                 Log.d(TAG, "Connected to ntfy push stream on $base ($myTopicId)")
                 isConnected = true
+                isConnecting = false
                 reconnectAttempt = 0 // Reset backoff on successful connection
             }
 
@@ -224,10 +232,14 @@ class PushListenerService : Service() {
             }
 
             override fun onClosed(eventSource: EventSource) {
+                isConnected = false
+                isConnecting = false
                 schedulePoliteReconnect("Stream closed")
             }
 
             override fun onFailure(eventSource: EventSource, t: Throwable?, response: Response?) {
+                isConnected = false
+                isConnecting = false
                 // If 429 Too Many Requests, cycle server
                 if (response?.code == 429) {
                     currentServerIndex++

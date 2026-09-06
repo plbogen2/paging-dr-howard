@@ -105,8 +105,8 @@ class PagerCoreEngine {
       return messageKey ? { type: "PURGE_REQUIRED", messageKey } : { type: "IGNORED" };
     }
 
-    // Rule 6: Signature deduplication
-    const dedupeKey = signature || `${senderTopicId}:${timestamp}`;
+    // Rule 6: Signature & message key deduplication
+    const dedupeKey = signature || (messageKey ? `${senderTopicId}:${messageKey}` : `${senderTopicId}:${timestamp}`);
     if (this.processedSignatures.has(dedupeKey)) {
       return { type: "IGNORED" };
     }
