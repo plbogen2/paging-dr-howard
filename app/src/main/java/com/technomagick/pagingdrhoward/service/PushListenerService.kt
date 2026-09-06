@@ -109,17 +109,19 @@ class PushListenerService : Service() {
                     val json = JSONObject(data)
                     // Firebase RTDB streaming format: event is put or patch, data contains {"path":"/", "data":{...}}
                     if (type == "put" || type == "patch" || json.has("data")) {
+                        val path = json.optString("path", "")
                         val innerData = json.opt("data")
                         if (innerData is JSONObject) {
                             if (innerData.has("type")) {
-                                processIncomingPayload(innerData.toString(), repository)
+                                val key = path.removePrefix("/").trim()
+                                processIncomingPayload(innerData.toString(), repository, if (key.isNotBlank()) key else null)
                             } else {
                                 val keys = innerData.keys()
                                 while (keys.hasNext()) {
                                     val k = keys.next()
                                     val item = innerData.optJSONObject(k)
                                     if (item != null && item.has("type")) {
-                                        processIncomingPayload(item.toString(), repository)
+                                        processIncomingPayload(item.toString(), repository, k)
                                     }
                                 }
                             }
@@ -132,7 +134,7 @@ class PushListenerService : Service() {
                     if (eventType != "message") return
                     val rawMessage = json.optString("message", "")
                     if (rawMessage.isNotBlank()) {
-                        processIncomingPayload(rawMessage, repository)
+                        processIncomingPayload(rawMessage, repository, null)
                     }
                 } catch (e: Exception) {
                     Log.e(TAG, "Error processing push event", e)
@@ -171,7 +173,7 @@ class PushListenerService : Service() {
         }, delayMs)
     }
 
-    private fun processIncomingPayload(payloadStr: String, repository: DefaultPagerRepository) {
+    private fun processIncomingPayload(payloadStr: String, repository: DefaultPagerRepository, messageKey: String? = null) {
         try {
             val json = JSONObject(payloadStr)
             val type = json.optString("type", "PAGE")
@@ -187,26 +189,39 @@ class PushListenerService : Service() {
             // Drop self-echo messages (e.g. if sending to a shared topic or looped relay)
             if (senderTopicId.isNotBlank() && senderTopicId == repository.getMyTopicId()) {
                 Log.d(TAG, "Ignored self-echo message from topic: $senderTopicId")
+                if (!messageKey.isNullOrBlank()) {
+                    PushSender.deleteMessage(repository.getRelayServerUrl(), repository.getMyTopicId(), messageKey)
+                }
                 return
+            }
+
+            // Helper to clean up message from RTDB if key is known
+            fun purgeThisMessage() {
+                if (!messageKey.isNullOrBlank()) {
+                    PushSender.deleteMessage(repository.getRelayServerUrl(), repository.getMyTopicId(), messageKey)
+                }
             }
 
             // Replay protection: Ignore messages older than 10 minutes or future timestamps > 10 minutes off
             val now = System.currentTimeMillis()
             if (timestamp > 0 && Math.abs(now - timestamp) > 600_000) {
-                Log.d(TAG, "Ignored stale message from timestamp $timestamp (current: $now)")
+                Log.d(TAG, "Ignored stale message from timestamp $timestamp (current: $now), purging...")
+                purgeThisMessage()
                 return
             }
 
             // Stale history filter: When connecting to Firebase RTDB, ignore historical messages sent before service connection
             if (timestamp > 0 && timestamp < (serviceStartTimeMs - 5000L)) {
-                Log.d(TAG, "Ignored pre-existing historical message from timestamp $timestamp (service started at $serviceStartTimeMs)")
+                Log.d(TAG, "Ignored pre-existing historical message from timestamp $timestamp (service started at $serviceStartTimeMs), purging...")
+                purgeThisMessage()
                 return
             }
 
             // Dismissal filter: Ignore emergency alerts previously acknowledged/dismissed by the user
             val lastDismissed = repository.getLastDismissedAlertTimestamp()
             if (type == "PAGE" && timestamp > 0 && timestamp <= lastDismissed) {
-                Log.d(TAG, "Ignored already dismissed page from timestamp $timestamp (lastDismissed: $lastDismissed)")
+                Log.d(TAG, "Ignored already dismissed page from timestamp $timestamp (lastDismissed: $lastDismissed), purging...")
+                purgeThisMessage()
                 return
             }
 
@@ -235,6 +250,9 @@ class PushListenerService : Service() {
                     repository.savePairedContact(contact)
                     Log.i(TAG, "Processed $type for contact: $senderName ($senderTopicId)")
 
+                    // Once processed, delete the handshake/update message from RTDB
+                    purgeThisMessage()
+
                     // If this is an initial PAIRING_HANDSHAKE (not a reply), immediately reply so pairing is bidirectional!
                     if (type == "PAIRING_HANDSHAKE") {
                         val peerPublicKey = if (senderPubKeyBase64.isNotBlank()) {
@@ -252,12 +270,16 @@ class PushListenerService : Service() {
                             serverUrl = repository.getRelayServerUrl()
                         )
                     }
+                } else {
+                    purgeThisMessage()
                 }
                 return
             }
 
             if (type == "PAGE_ACK") {
                 Log.i(TAG, "Received PAGE_ACK from $senderName ($senderTopicId)")
+                purgeThisMessage()
+
                 // Post acknowledgment notification to user
                 val ackNotification = NotificationCompat.Builder(this, DndHelper.CHANNEL_STATUS_ID)
                     .setSmallIcon(android.R.drawable.ic_dialog_info)
@@ -287,6 +309,7 @@ class PushListenerService : Service() {
             // Reject invalid incoming pages (if signature was provided but failed verification)
             if (!isSignatureValid) {
                 Log.w(TAG, "Rejected page: Signature validation failed from $senderName")
+                purgeThisMessage()
                 return
             }
 
@@ -311,6 +334,9 @@ class PushListenerService : Service() {
                 putExtra("EXTRA_MESSAGE", decryptedMessage)
                 putExtra("EXTRA_LEVEL", pageLevel.code)
                 putExtra("EXTRA_TIMESTAMP", timestamp)
+                if (!messageKey.isNullOrBlank()) {
+                    putExtra("EXTRA_MESSAGE_KEY", messageKey)
+                }
             }
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {

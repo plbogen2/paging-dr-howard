@@ -304,4 +304,51 @@ object PushSender {
             }
         })
     }
+
+    /**
+     * Deletes a message key from a Firebase RTDB channel to prevent infinite database growth.
+     */
+    fun deleteMessage(
+        serverUrl: String = DEFAULT_NTFY_BASE_URL,
+        topicId: String,
+        messageKey: String,
+        onResult: (Boolean) -> Unit = {}
+    ) {
+        val cleanTopic = topicId.trim().replace(Regex("^https?:/+[^/]+/"), "").replace(Regex("[^a-zA-Z0-9_-]"), "_")
+        val cleanKey = messageKey.trim().removePrefix("/")
+        if (cleanTopic.isBlank() || cleanKey.isBlank()) {
+            onResult(false)
+            return
+        }
+
+        val targetBase = if (serverUrl.isNotBlank()) (if (serverUrl.endsWith("/")) serverUrl else "$serverUrl/") else DEFAULT_NTFY_BASE_URL
+        if (!targetBase.contains("firebaseio.com")) {
+            // Non-RTDB relays (e.g. standard ntfy) do not support / delete via key this way
+            onResult(true)
+            return
+        }
+
+        val deleteUrl = "${targetBase}channels/$cleanTopic/$cleanKey.json"
+        val request = Request.Builder()
+            .url(deleteUrl)
+            .addHeader("User-Agent", USER_AGENT)
+            .delete()
+            .build()
+
+        client.newCall(request).enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                Log.w(TAG, "Failed to delete message $cleanKey from $cleanTopic: ${e.localizedMessage}")
+                onResult(false)
+            }
+            override fun onResponse(call: Call, response: Response) {
+                val success = response.isSuccessful
+                if (success) {
+                    Log.d(TAG, "Successfully purged message $cleanKey from $cleanTopic")
+                } else {
+                    Log.w(TAG, "Purge message $cleanKey returned code ${response.code}")
+                }
+                onResult(success)
+            }
+        })
+    }
 }

@@ -47,6 +47,7 @@ class EmergencyAlertActivity : ComponentActivity() {
         val messageText = intent.getStringExtra("EXTRA_MESSAGE") ?: "URGENT: Please respond immediately!"
         val levelCode = intent.getStringExtra("EXTRA_LEVEL")
         val timestamp = intent.getLongExtra("EXTRA_TIMESTAMP", 0L)
+        val messageKey = intent.getStringExtra("EXTRA_MESSAGE_KEY") ?: ""
         val pageLevel = PageLevel.fromCode(levelCode)
 
         setContent {
@@ -54,12 +55,12 @@ class EmergencyAlertActivity : ComponentActivity() {
                 pageLevel = pageLevel,
                 senderName = senderName,
                 messageText = messageText,
-                onDismiss = { dismissPage(senderTopic, timestamp) }
+                onDismiss = { dismissPage(senderTopic, timestamp, messageKey) }
             )
         }
     }
 
-    private fun dismissPage(senderTopic: String, alertTimestamp: Long) {
+    private fun dismissPage(senderTopic: String, alertTimestamp: Long, messageKey: String = "") {
         val stopServiceIntent = Intent(this, EmergencyPagerService::class.java).apply {
             action = EmergencyPagerService.ACTION_STOP_ALARM
         }
@@ -71,6 +72,15 @@ class EmergencyAlertActivity : ComponentActivity() {
         // Persist dismissed timestamp so replayed SSE events for this page or earlier are permanently ignored
         val effectiveDismissTimestamp = maxOf(alertTimestamp, System.currentTimeMillis())
         repository.saveLastDismissedAlertTimestamp(effectiveDismissTimestamp)
+
+        // Purge the emergency alert message from Firebase RTDB now that user acknowledged/dismissed
+        if (messageKey.isNotBlank()) {
+            com.technomagick.pagingdrhoward.network.PushSender.deleteMessage(
+                serverUrl = repository.getRelayServerUrl(),
+                topicId = repository.getMyTopicId(),
+                messageKey = messageKey
+            )
+        }
 
         // Send acknowledgment receipt back to sender's topic
         if (senderTopic.isNotBlank()) {
@@ -94,13 +104,16 @@ class EmergencyAlertActivity : ComponentActivity() {
     }
 
     companion object {
+        const val EXTRA_MESSAGE_KEY = "EXTRA_MESSAGE_KEY"
+
         fun createIntent(
             context: Context,
             sender: String?,
             senderTopic: String?,
             message: String?,
             level: PageLevel,
-            timestamp: Long = 0L
+            timestamp: Long = 0L,
+            messageKey: String? = null
         ): Intent {
             return Intent(context, EmergencyAlertActivity::class.java).apply {
                 putExtra("EXTRA_SENDER", sender)
@@ -108,6 +121,7 @@ class EmergencyAlertActivity : ComponentActivity() {
                 putExtra("EXTRA_MESSAGE", message)
                 putExtra("EXTRA_LEVEL", level.code)
                 putExtra("EXTRA_TIMESTAMP", timestamp)
+                putExtra(EXTRA_MESSAGE_KEY, messageKey)
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
             }
         }

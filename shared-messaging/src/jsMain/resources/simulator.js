@@ -265,18 +265,33 @@
       document.getElementById(statusElId).className = "text-emerald-400 font-bold";
 
       const startTime = Date.now();
-      channelRef.limitToLast(5).on('child_added', (snapshot) => {
+      channelRef.limitToLast(10).on('child_added', (snapshot) => {
         const payload = snapshot.val();
+        const msgKey = snapshot.key;
         if (!payload) return;
-        if (payload.timestamp && payload.timestamp < (startTime - 3000)) return;
-        if (payload.senderTopicId === phoneObj.topic) return;
 
-        handleIncomingPayload(phoneKey, phoneObj, payload);
+        // Auto-purge stale pre-existing messages from database
+        if (payload.timestamp && payload.timestamp < (startTime - 3000)) {
+          channelRef.child(msgKey).remove().catch(() => {});
+          return;
+        }
+        if (payload.senderTopicId === phoneObj.topic) {
+          channelRef.child(msgKey).remove().catch(() => {});
+          return;
+        }
+
+        handleIncomingPayload(phoneKey, phoneObj, payload, msgKey);
       });
     }
     const initSSE = initFirebaseListener;
 
-    async function handleIncomingPayload(recipientKey, recipientObj, payload) {
+    async function handleIncomingPayload(recipientKey, recipientObj, payload, msgKey) {
+      const cleanTopic = recipientObj.topic.replace(/[^a-zA-Z0-9_-]/g, '_');
+      const channelRef = db.ref(`channels/${cleanTopic}`);
+      const purgeMsg = () => {
+        if (msgKey) channelRef.child(msgKey).remove().catch(() => {});
+      };
+
       logDevice(recipientKey, `📥 [INCOMING ${payload.type}]`, "text-yellow-400 font-bold");
       logDevice(recipientKey, `   From: "${payload.senderName || 'Unknown'}" (${payload.senderTopicId || 'N/A'})`, "text-yellow-200");
       if (payload.level) logDevice(recipientKey, `   Level: ${payload.level}`, "text-yellow-200");
@@ -289,6 +304,9 @@
         };
         renderContacts(recipientKey, recipientObj);
         logDevice(recipientKey, `   ✔ Added "${payload.senderName}" to address book!`, "text-emerald-400 font-bold");
+
+        // Purge handshake message from RTDB immediately after processing
+        purgeMsg();
 
         // Mutual linking: If this was the initial handshake (not a reply), auto-reply back with our credentials!
         if (payload.type === 'PAIRING_HANDSHAKE') {
@@ -315,11 +333,14 @@
           renderContacts(recipientKey, recipientObj);
           logDevice(recipientKey, `   ✔ Saved new contact "${payload.senderName}"!`, "text-emerald-400 font-bold");
         }
+        purgeMsg();
       } else if (payload.type === 'PAGE') {
+        recipientObj.activeAlertMsgKey = msgKey;
         triggerAlertUI(recipientKey, recipientObj, payload);
       } else if (payload.type === 'PAGE_ACK') {
         logDevice(recipientKey, `✅ [PAGE ACKNOWLEDGED]`, "text-emerald-400 font-extrabold text-sm");
         logDevice(recipientKey, `   "${payload.senderName}" acknowledged and silenced your alarm!`, "text-emerald-300 font-bold");
+        purgeMsg();
       }
     }
 
@@ -369,6 +390,13 @@
 
       document.getElementById(`${phoneKey}_alertCard`).classList.add('hidden');
       logDevice(phoneKey, `🔕 Alarm silenced & acknowledged by user.`, "text-slate-300 font-bold");
+
+      // Purge active alert page from Firebase RTDB now that user acknowledged/dismissed
+      if (phoneObj.activeAlertMsgKey) {
+        const cleanTopic = phoneObj.topic.replace(/[^a-zA-Z0-9_-]/g, '_');
+        db.ref(`channels/${cleanTopic}/${phoneObj.activeAlertMsgKey}`).remove().catch(() => {});
+        phoneObj.activeAlertMsgKey = null;
+      }
 
       const targetTopic = phoneObj.activeAlertSenderTopic;
       if (targetTopic) {
