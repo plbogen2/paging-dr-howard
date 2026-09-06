@@ -5,7 +5,13 @@ plugins {
 }
 
 kotlin {
-    androidTarget()
+    androidTarget {
+        compilations.all {
+            kotlinOptions {
+                jvmTarget = "1.8"
+            }
+        }
+    }
     js(IR) {
         browser {
             binaries.executable()
@@ -32,5 +38,9 @@ android {
     namespace = "com.technomagick.pagingdrhoward.shared"
     defaultConfig {
         minSdk = 26
+    }
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_1_8
+        targetCompatibility = JavaVersion.VERSION_1_8
     }
 }
