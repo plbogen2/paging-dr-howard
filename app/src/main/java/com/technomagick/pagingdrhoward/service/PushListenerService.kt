@@ -82,8 +82,9 @@ class PushListenerService : Service() {
             }
             is com.technomagick.pagingdrhoward.shared.EngineEvent.PageAckReceived -> {
                 Log.i(TAG, "Engine received PAGE_ACK from ${event.senderName}")
-                if (!event.messageKey.isNullOrBlank()) {
-                    PushSender.deleteMessage(repository.getRelayServerUrl(), repository.getMyTopicId(), event.messageKey)
+                val key = event.messageKey
+                if (!key.isNullOrBlank()) {
+                    PushSender.deleteMessage(repository.getRelayServerUrl(), repository.getMyTopicId(), key)
                 }
                 val ackNotification = NotificationCompat.Builder(this, DndHelper.CHANNEL_STATUS_ID)
                     .setSmallIcon(android.R.drawable.ic_dialog_info)
@@ -106,8 +107,9 @@ class PushListenerService : Service() {
                     passphrase = existing?.passphrase ?: ""
                 )
                 repository.savePairedContact(contact)
-                if (!event.messageKey.isNullOrBlank()) {
-                    PushSender.deleteMessage(repository.getRelayServerUrl(), repository.getMyTopicId(), event.messageKey)
+                val key = event.messageKey
+                if (!key.isNullOrBlank()) {
+                    PushSender.deleteMessage(repository.getRelayServerUrl(), repository.getMyTopicId(), key)
                 }
                 if (event.requiresReply) {
                     val peerPublicKey = if (event.senderPublicKey.isNotBlank()) {
@@ -131,8 +133,9 @@ class PushListenerService : Service() {
                 if (existing != null) {
                     repository.savePairedContact(existing.copy(name = event.newName))
                 }
-                if (!event.messageKey.isNullOrBlank()) {
-                    PushSender.deleteMessage(repository.getRelayServerUrl(), repository.getMyTopicId(), event.messageKey)
+                val key = event.messageKey
+                if (!key.isNullOrBlank()) {
+                    PushSender.deleteMessage(repository.getRelayServerUrl(), repository.getMyTopicId(), key)
                 }
             }
             is com.technomagick.pagingdrhoward.shared.EngineEvent.PurgeRequired -> {
