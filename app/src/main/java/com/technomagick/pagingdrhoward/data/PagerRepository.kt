@@ -160,7 +160,7 @@ class DefaultPagerRepository(private val sharedPreferences: SharedPreferences) :
         current.add(messageKey)
         // Keep set size bounded to 100 most recent dismissed keys
         if (current.size > 100) {
-            val pruned = current.takeLast(100).toSet()
+            val pruned = current.toList().takeLast(100).toSet()
             sharedPreferences.edit().putStringSet(KEY_DISMISSED_MESSAGE_KEYS, pruned).apply()
         } else {
             sharedPreferences.edit().putStringSet(KEY_DISMISSED_MESSAGE_KEYS, current).apply()
