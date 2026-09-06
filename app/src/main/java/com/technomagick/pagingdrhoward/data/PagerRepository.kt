@@ -20,6 +20,8 @@ interface PagerRepository {
     fun getPairedContacts(): List<PairedContact>
     fun savePairedContact(contact: PairedContact)
     fun deletePairedContact(contactId: String)
+    fun getLastDismissedAlertTimestamp(): Long
+    fun saveLastDismissedAlertTimestamp(timestamp: Long)
 }
 
 class DefaultPagerRepository(private val sharedPreferences: SharedPreferences) : PagerRepository {
@@ -133,6 +135,17 @@ class DefaultPagerRepository(private val sharedPreferences: SharedPreferences) :
         sharedPreferences.edit().putString(KEY_PAIRED_CONTACTS, jsonStr).apply()
     }
 
+    override fun getLastDismissedAlertTimestamp(): Long {
+        return sharedPreferences.getLong(KEY_LAST_DISMISSED_ALERT_TIMESTAMP, 0L)
+    }
+
+    override fun saveLastDismissedAlertTimestamp(timestamp: Long) {
+        val current = getLastDismissedAlertTimestamp()
+        if (timestamp > current) {
+            sharedPreferences.edit().putLong(KEY_LAST_DISMISSED_ALERT_TIMESTAMP, timestamp).apply()
+        }
+    }
+
     companion object {
         const val PREF_NAME = "pager_prefs"
         const val KEY_MY_TOPIC_ID = "my_topic_id"
@@ -143,6 +156,7 @@ class DefaultPagerRepository(private val sharedPreferences: SharedPreferences) :
         const val KEY_RELAY_SERVER_URL = "relay_server_url"
         const val KEY_PAIRED_CONTACTS = "paired_contacts"
         const val KEY_LOG_ENABLED = "log_enabled"
+        const val KEY_LAST_DISMISSED_ALERT_TIMESTAMP = "last_dismissed_alert_timestamp"
         const val DEFAULT_RELAY_SERVER_URL = "https://paging-dr-howard-default-rtdb.firebaseio.com/"
     }
 

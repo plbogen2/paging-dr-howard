@@ -30,6 +30,9 @@ class PushListenerService : Service() {
     private var reconnectAttempt = 0
     private var currentServerIndex = 0
     private var serviceStartTimeMs = System.currentTimeMillis()
+    private var isConnected = false
+    private var currentListeningTopic: String? = null
+    private var currentListeningServer: String? = null
 
     private val sseClient = OkHttpClient.Builder()
         .readTimeout(0, TimeUnit.MILLISECONDS)
@@ -55,8 +58,6 @@ class PushListenerService : Service() {
     }
 
     private fun startSseListener() {
-        eventSource?.cancel()
-
         val prefs = getSharedPreferences(DefaultPagerRepository.PREF_NAME, Context.MODE_PRIVATE)
         val repository = DefaultPagerRepository(prefs)
         val myTopicId = repository.getMyTopicId()
@@ -70,6 +71,18 @@ class PushListenerService : Service() {
 
         val base = serverCandidates[currentServerIndex % serverCandidates.size]
         val cleanTopic = myTopicId.trim().replace(Regex("^https?:/+[^/]+/"), "").replace(Regex("[^a-zA-Z0-9_-]"), "_")
+
+        // If already connected and listening to this exact server and topic, avoid tearing down stream
+        if (isConnected && eventSource != null && currentListeningTopic == cleanTopic && currentListeningServer == base) {
+            Log.d(TAG, "Already connected to push stream on $base ($cleanTopic), ignoring redundant startSseListener call")
+            return
+        }
+
+        eventSource?.cancel()
+        isConnected = false
+        currentListeningTopic = cleanTopic
+        currentListeningServer = base
+
         val sseUrl = if (base.contains("firebaseio.com")) {
             val cleanBase = if (base.endsWith("/")) base else "$base/"
             "${cleanBase}channels/$cleanTopic.json"
@@ -86,6 +99,7 @@ class PushListenerService : Service() {
         eventSource = factory.newEventSource(request, object : EventSourceListener() {
             override fun onOpen(eventSource: EventSource, response: Response) {
                 Log.d(TAG, "Connected to ntfy push stream on $base ($myTopicId)")
+                isConnected = true
                 reconnectAttempt = 0 // Reset backoff on successful connection
             }
 
@@ -170,10 +184,29 @@ class PushListenerService : Service() {
             val signature = json.optString("signature", "")
             val pageLevel = PageLevel.fromCode(levelCode)
 
+            // Drop self-echo messages (e.g. if sending to a shared topic or looped relay)
+            if (senderTopicId.isNotBlank() && senderTopicId == repository.getMyTopicId()) {
+                Log.d(TAG, "Ignored self-echo message from topic: $senderTopicId")
+                return
+            }
+
             // Replay protection: Ignore messages older than 10 minutes or future timestamps > 10 minutes off
             val now = System.currentTimeMillis()
             if (timestamp > 0 && Math.abs(now - timestamp) > 600_000) {
                 Log.d(TAG, "Ignored stale message from timestamp $timestamp (current: $now)")
+                return
+            }
+
+            // Stale history filter: When connecting to Firebase RTDB, ignore historical messages sent before service connection
+            if (timestamp > 0 && timestamp < (serviceStartTimeMs - 5000L)) {
+                Log.d(TAG, "Ignored pre-existing historical message from timestamp $timestamp (service started at $serviceStartTimeMs)")
+                return
+            }
+
+            // Dismissal filter: Ignore emergency alerts previously acknowledged/dismissed by the user
+            val lastDismissed = repository.getLastDismissedAlertTimestamp()
+            if (type == "PAGE" && timestamp > 0 && timestamp <= lastDismissed) {
+                Log.d(TAG, "Ignored already dismissed page from timestamp $timestamp (lastDismissed: $lastDismissed)")
                 return
             }
 
@@ -277,6 +310,7 @@ class PushListenerService : Service() {
                 putExtra("EXTRA_SENDER_TOPIC", senderTopicId)
                 putExtra("EXTRA_MESSAGE", decryptedMessage)
                 putExtra("EXTRA_LEVEL", pageLevel.code)
+                putExtra("EXTRA_TIMESTAMP", timestamp)
             }
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {

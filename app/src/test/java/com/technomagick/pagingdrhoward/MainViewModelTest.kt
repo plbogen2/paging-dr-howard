@@ -20,6 +20,7 @@ class FakePagerRepository : PagerRepository {
     private val contacts = mutableListOf<PairedContact>()
 
     private var relayServerUrl: String = "https://ntfy.tedomum.fr/"
+    private var lastDismissedAlertTimestamp: Long = 0L
 
     override fun getMyTopicId(): String = topicId
     override fun getMyName(): String = myName
@@ -38,6 +39,12 @@ class FakePagerRepository : PagerRepository {
     }
     override fun deletePairedContact(contactId: String) {
         contacts.removeAll { it.id == contactId }
+    }
+    override fun getLastDismissedAlertTimestamp(): Long = lastDismissedAlertTimestamp
+    override fun saveLastDismissedAlertTimestamp(timestamp: Long) {
+        if (timestamp > lastDismissedAlertTimestamp) {
+            lastDismissedAlertTimestamp = timestamp
+        }
     }
 }
 

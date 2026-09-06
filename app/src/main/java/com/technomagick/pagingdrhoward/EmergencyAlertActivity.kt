@@ -46,6 +46,7 @@ class EmergencyAlertActivity : ComponentActivity() {
         val senderTopic = intent.getStringExtra("EXTRA_SENDER_TOPIC") ?: ""
         val messageText = intent.getStringExtra("EXTRA_MESSAGE") ?: "URGENT: Please respond immediately!"
         val levelCode = intent.getStringExtra("EXTRA_LEVEL")
+        val timestamp = intent.getLongExtra("EXTRA_TIMESTAMP", 0L)
         val pageLevel = PageLevel.fromCode(levelCode)
 
         setContent {
@@ -53,21 +54,26 @@ class EmergencyAlertActivity : ComponentActivity() {
                 pageLevel = pageLevel,
                 senderName = senderName,
                 messageText = messageText,
-                onDismiss = { dismissPage(senderTopic) }
+                onDismiss = { dismissPage(senderTopic, timestamp) }
             )
         }
     }
 
-    private fun dismissPage(senderTopic: String) {
+    private fun dismissPage(senderTopic: String, alertTimestamp: Long) {
         val stopServiceIntent = Intent(this, EmergencyPagerService::class.java).apply {
             action = EmergencyPagerService.ACTION_STOP_ALARM
         }
         startService(stopServiceIntent)
 
+        val prefs = getSharedPreferences(com.technomagick.pagingdrhoward.data.DefaultPagerRepository.PREF_NAME, MODE_PRIVATE)
+        val repository = com.technomagick.pagingdrhoward.data.DefaultPagerRepository(prefs)
+
+        // Persist dismissed timestamp so replayed SSE events for this page or earlier are permanently ignored
+        val effectiveDismissTimestamp = maxOf(alertTimestamp, System.currentTimeMillis())
+        repository.saveLastDismissedAlertTimestamp(effectiveDismissTimestamp)
+
         // Send acknowledgment receipt back to sender's topic
         if (senderTopic.isNotBlank()) {
-            val prefs = getSharedPreferences(com.technomagick.pagingdrhoward.data.DefaultPagerRepository.PREF_NAME, MODE_PRIVATE)
-            val repository = com.technomagick.pagingdrhoward.data.DefaultPagerRepository(prefs)
             val contact = repository.getPairedContacts().find { it.topicId == senderTopic }
             val peerPublicKey = if (contact != null && contact.publicKeyBase64.isNotBlank()) {
                 try { com.technomagick.pagingdrhoward.util.CryptoManager.publicKeyFromBase64(contact.publicKeyBase64) } catch (e: Exception) { null }
@@ -88,12 +94,20 @@ class EmergencyAlertActivity : ComponentActivity() {
     }
 
     companion object {
-        fun createIntent(context: Context, sender: String?, senderTopic: String?, message: String?, level: PageLevel): Intent {
+        fun createIntent(
+            context: Context,
+            sender: String?,
+            senderTopic: String?,
+            message: String?,
+            level: PageLevel,
+            timestamp: Long = 0L
+        ): Intent {
             return Intent(context, EmergencyAlertActivity::class.java).apply {
                 putExtra("EXTRA_SENDER", sender)
                 putExtra("EXTRA_SENDER_TOPIC", senderTopic)
                 putExtra("EXTRA_MESSAGE", message)
                 putExtra("EXTRA_LEVEL", level.code)
+                putExtra("EXTRA_TIMESTAMP", timestamp)
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
             }
         }

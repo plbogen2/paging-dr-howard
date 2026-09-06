@@ -30,11 +30,12 @@ class EmergencyPagerService : Service() {
         val senderTopic = intent?.getStringExtra("EXTRA_SENDER_TOPIC") ?: ""
         val message = intent?.getStringExtra("EXTRA_MESSAGE") ?: "URGENT: Please respond!"
         val levelCode = intent?.getStringExtra("EXTRA_LEVEL")
+        val timestamp = intent?.getLongExtra("EXTRA_TIMESTAMP", 0L) ?: 0L
         val pageLevel = PageLevel.fromCode(levelCode)
 
         DndHelper.createEmergencyNotificationChannel(this)
 
-        val fullScreenIntent = EmergencyAlertActivity.createIntent(this, sender, senderTopic, message, pageLevel)
+        val fullScreenIntent = EmergencyAlertActivity.createIntent(this, sender, senderTopic, message, pageLevel, timestamp)
         val fullScreenPendingIntent = PendingIntent.getActivity(
             this,
             0,
