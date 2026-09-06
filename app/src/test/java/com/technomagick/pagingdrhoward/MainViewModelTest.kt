@@ -46,6 +46,9 @@ class FakePagerRepository : PagerRepository {
             lastDismissedAlertTimestamp = timestamp
         }
     }
+    private val dismissedKeys = mutableSetOf<String>()
+    override fun isMessageDismissed(messageKey: String): Boolean = dismissedKeys.contains(messageKey)
+    override fun markMessageDismissed(messageKey: String) { dismissedKeys.add(messageKey) }
 }
 
 class MainViewModelTest {
