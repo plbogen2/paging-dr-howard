@@ -63,6 +63,12 @@ class PushListenerService : Service() {
         when (event) {
             is com.technomagick.pagingdrhoward.shared.EngineEvent.AlertTriggered -> {
                 Log.i(TAG, "Engine alert triggered from ${event.senderName} (${event.level.code})")
+
+                if (!shouldDispatchAlert(event.messageKey, event.senderTopicId, event.timestamp)) {
+                    Log.d(TAG, "Ignoring duplicate alert dispatch for key: ${event.messageKey} / topic: ${event.senderTopicId}")
+                    return
+                }
+
                 val pageLevel = PageLevel.fromCode(event.level.code)
                 val serviceIntent = Intent(this, EmergencyPagerService::class.java).apply {
                     action = EmergencyPagerService.ACTION_START_ALARM
@@ -295,5 +301,21 @@ class PushListenerService : Service() {
         const val NOTIFICATION_ID = 1002
         const val ACTION_START_LISTENING = "com.technomagick.pagingdrhoward.START_LISTENING"
         private const val TAG = "PushListenerService"
+
+        private val recentlyTriggeredSignatures = mutableMapOf<String, Long>()
+
+        @Synchronized
+        fun shouldDispatchAlert(key: String?, senderTopic: String, timestamp: Long): Boolean {
+            val now = System.currentTimeMillis()
+            recentlyTriggeredSignatures.entries.removeAll { (now - it.value) > 60_000L }
+
+            val sig = if (!key.isNullOrBlank()) "$senderTopic:$key" else "$senderTopic:$timestamp"
+            val lastTime = recentlyTriggeredSignatures[sig]
+            if (lastTime != null && (now - lastTime) < 15_000L) {
+                return false
+            }
+            recentlyTriggeredSignatures[sig] = now
+            return true
+        }
     }
 }

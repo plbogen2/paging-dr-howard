@@ -13,8 +13,16 @@ import com.technomagick.pagingdrhoward.util.AudioPlayer
 import com.technomagick.pagingdrhoward.util.DndHelper
 
 class EmergencyPagerService : Service() {
-    private var currentActiveMessageKey: String? = null
-    private var lastAlarmTriggerTimeMs: Long = 0L
+    companion object {
+        const val NOTIFICATION_ID = 1001
+        const val ACTION_START_ALARM = "com.technomagick.pagingdrhoward.START_ALARM"
+        const val ACTION_STOP_ALARM = "com.technomagick.pagingdrhoward.STOP_ALARM"
+
+        @Volatile
+        private var currentActiveMessageKey: String? = null
+        @Volatile
+        private var lastAlarmTriggerTimeMs: Long = 0L
+    }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -40,10 +48,10 @@ class EmergencyPagerService : Service() {
 
         val now = System.currentTimeMillis()
         val isSameActiveMessage = !messageKey.isNullOrBlank() && messageKey == currentActiveMessageKey
-        val isRapidDuplicate = (now - lastAlarmTriggerTimeMs) < 3000L && currentActiveMessageKey != null
+        val isRapidDuplicate = (now - lastAlarmTriggerTimeMs) < 4000L
 
         if (isSameActiveMessage || isRapidDuplicate) {
-            android.util.Log.d("EmergencyPagerService", "Ignoring duplicate alarm trigger for key: $messageKey")
+            android.util.Log.d("EmergencyPagerService", "Ignoring duplicate alarm trigger for key: $messageKey (dt=${now - lastAlarmTriggerTimeMs}ms)")
             return START_STICKY
         }
 
@@ -86,11 +94,5 @@ class EmergencyPagerService : Service() {
         startActivity(fullScreenIntent)
 
         return START_STICKY
-    }
-
-    companion object {
-        const val NOTIFICATION_ID = 1001
-        const val ACTION_START_ALARM = "com.technomagick.pagingdrhoward.START_ALARM"
-        const val ACTION_STOP_ALARM = "com.technomagick.pagingdrhoward.STOP_ALARM"
     }
 }
