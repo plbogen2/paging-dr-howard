@@ -11,7 +11,7 @@ import android.util.Log
 
 object DndHelper {
     const val CHANNEL_EMERGENCY_ID = "emergency_page_channel_v2"
-    const val CHANNEL_STATUS_ID = "pager_status_channel"
+    const val CHANNEL_STATUS_ID = "pager_status_channel_v2"
     const val CHANNEL_NAME = "Emergency Pages"
     private const val TAG = "DndHelper"
 
@@ -63,18 +63,19 @@ object DndHelper {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
 
-                // Clean up legacy noisy channel if present
+                // Clean up legacy channels if present
                 try {
                     notificationManager.deleteNotificationChannel("emergency_page_channel")
+                    notificationManager.deleteNotificationChannel("pager_status_channel")
                 } catch (e: Throwable) {
                     // Ignored
                 }
 
-                // 1. Silent Background Status Channel for PushListenerService
+                // 1. Silent Background Status Channel for PushListenerService (minimized, no badge)
                 val statusChannel = NotificationChannel(
                     CHANNEL_STATUS_ID,
                     "Paging Service Status",
-                    NotificationManager.IMPORTANCE_LOW
+                    NotificationManager.IMPORTANCE_MIN
                 ).apply {
                     description = "Shows that Paging Dr. Howard is actively listening for incoming pages"
                     setSound(null, null)

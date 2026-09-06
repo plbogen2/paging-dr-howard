@@ -29,6 +29,7 @@ class EmergencyAlertActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        activeActivity = this
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
             setShowWhenLocked(true)
@@ -120,8 +121,34 @@ class EmergencyAlertActivity : ComponentActivity() {
         finish()
     }
 
+    override fun onDestroy() {
+        super.onDestroy()
+        if (activeActivity === this) {
+            activeActivity = null
+        }
+    }
+
     companion object {
         const val EXTRA_MESSAGE_KEY = "EXTRA_MESSAGE_KEY"
+
+        @Volatile
+        private var activeActivity: EmergencyAlertActivity? = null
+
+        fun dismissCurrentAlert(context: Context) {
+            // Stop alarm audio and background emergency pager service
+            com.technomagick.pagingdrhoward.util.AudioPlayer.stopEmergencyAlarm(context)
+            val stopServiceIntent = Intent(context, EmergencyPagerService::class.java).apply {
+                action = EmergencyPagerService.ACTION_STOP_ALARM
+            }
+            context.startService(stopServiceIntent)
+
+            // Dismiss the full screen UI if showing
+            activeActivity?.let { activity ->
+                activity.runOnUiThread {
+                    activity.finish()
+                }
+            }
+        }
 
         fun createIntent(
             context: Context,

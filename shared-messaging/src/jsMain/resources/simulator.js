@@ -550,6 +550,16 @@ class PagerCoreEngine {
             saveSimState();
             renderContacts(recipientKey, recipientObj);
           }
+          // Auto-dismiss any active alert card and silence alarm on recipient device if active
+          if (activeAlertIntervals[recipientKey]) {
+            clearInterval(activeAlertIntervals[recipientKey]);
+            delete activeAlertIntervals[recipientKey];
+          }
+          const alertCardEl = document.getElementById(`${recipientKey}_alertCard`);
+          if (alertCardEl && !alertCardEl.classList.contains('hidden')) {
+            alertCardEl.classList.add('hidden');
+            logDevice(recipientKey, `🔕 Active alert automatically dismissed upon acknowledgment.`, "text-slate-300");
+          }
           break;
 
         case "PAIRING_RECEIVED":

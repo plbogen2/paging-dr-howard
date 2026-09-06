@@ -101,6 +101,13 @@ class PushListenerService : Service() {
                 }
                 // Record acknowledgment silently for in-app UI display without chime or notification
                 repository.recordContactAck(event.senderTopicId, System.currentTimeMillis())
+
+                // Auto-dismiss any active full-screen alert and stop emergency pager alarm
+                try {
+                    com.technomagick.pagingdrhoward.EmergencyAlertActivity.dismissCurrentAlert(this)
+                } catch (e: Throwable) {
+                    Log.w(TAG, "Failed to auto-dismiss emergency alert on ack", e)
+                }
             }
             is com.technomagick.pagingdrhoward.shared.EngineEvent.PairingReceived -> {
                 Log.i(TAG, "Engine received pairing from ${event.senderName}")
@@ -285,7 +292,8 @@ class PushListenerService : Service() {
             .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
             .setContentTitle("Paging Dr. Howard 📟")
             .setContentText("Ready & Listening for Family Emergency Pages")
-            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setPriority(NotificationCompat.PRIORITY_MIN)
+            .setBadgeIconType(NotificationCompat.BADGE_ICON_NONE)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
             .build()
