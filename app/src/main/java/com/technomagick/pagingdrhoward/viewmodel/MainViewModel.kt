@@ -33,7 +33,7 @@ data class MainUiState(
     val appVersion: String = "1.0.0",
     val cooldowns: Map<String, Int> = emptyMap(),
     val lastAckedContacts: Map<String, Long> = emptyMap(),
-    val isNaviSoundEnabled: Boolean = true,
+    val isNaviSoundEnabled: Boolean = false,
     val errorMessage: String? = null,
     val successMessage: String? = null
 )

@@ -190,7 +190,7 @@ class DefaultPagerRepository(private val sharedPreferences: SharedPreferences) :
     }
 
     override fun isNaviSoundEnabled(): Boolean {
-        return sharedPreferences.getBoolean(KEY_NAVI_SOUND_ENABLED, true)
+        return sharedPreferences.getBoolean(KEY_NAVI_SOUND_ENABLED, false)
     }
 
     override fun setNaviSoundEnabled(enabled: Boolean) {
