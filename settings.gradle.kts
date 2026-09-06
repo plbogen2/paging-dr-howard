@@ -14,4 +14,4 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "PagingDrHoward"
-include(":app", ":shared-messaging")
+include(":app")
