@@ -1,8 +1,14 @@
 # Paging Dr. Howard 📟🔐
 
-An open, high-reliability emergency paging system designed for family members to reach each other in urgent situations. Pages override **Do Not Disturb (DND)**, **Silent**, and **Vibrate** modes to ring at full volume with an interactive full-screen alert.
+> **Emergency family paging system that rings at full volume through Do Not Disturb (DND) and silent mode.**
 
-Includes both the native Android client and an interactive browser-based phone simulator that shares the exact same core engine.
+---
+
+## 📖 Overview
+
+**Paging Dr. Howard** is an open-source, high-reliability emergency paging application built specifically for families, close relatives, and care circles. When an emergency strikes, normal text messages or phone calls frequently go unnoticed because phones are set to Silent, Vibrate, or Do Not Disturb.
+
+Paging Dr. Howard solves this by providing direct, encrypted peer-to-peer style paging that punches through Android's sound restrictions using dedicated alarm audio streams and full-screen lock-screen overrides. The repository contains both the production **Android Application** and a cross-platform **Web Phone Simulator** sharing the identical messaging and protocol logic.
 
 ---
 
