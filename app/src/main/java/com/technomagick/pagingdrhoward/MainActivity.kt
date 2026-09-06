@@ -134,6 +134,8 @@ class MainActivity : ComponentActivity() {
                     onSelectContact = { contact -> viewModel.selectContactForPage(contact) },
                     onGrantDnd = { DndHelper.openDndSettings(this) },
                     onTestAlarm = { triggerLocalTestPage() },
+                    onTestHeyLook = { triggerLocalTestPage(PageLevel.HEY_LOOK) },
+                    onToggleNaviSound = { enabled -> viewModel.setNaviSoundEnabled(enabled) },
                     onCopyText = { label, text -> copyToClipboard(label, text) },
                     onPasteFromClipboard = { getClipboardText() },
                     onShareText = { title, text -> shareText(title, text) },
@@ -180,12 +182,12 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun triggerLocalTestPage() {
+    private fun triggerLocalTestPage(level: PageLevel = PageLevel.SOS) {
         val intent = Intent(this, EmergencyPagerService::class.java).apply {
             action = EmergencyPagerService.ACTION_START_ALARM
             putExtra("EXTRA_SENDER", "Self-Test")
-            putExtra("EXTRA_MESSAGE", "This is a test of the emergency alarm sound!")
-            putExtra("EXTRA_LEVEL", PageLevel.SOS.code)
+            putExtra("EXTRA_MESSAGE", if (level == PageLevel.HEY_LOOK) "Testing Hey Look! notification sound" else "This is a test of the emergency alarm sound!")
+            putExtra("EXTRA_LEVEL", level.code)
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             startForegroundService(intent)
@@ -270,6 +272,8 @@ fun MainPagerApp(
     onSelectContact: (PairedContact) -> Unit,
     onGrantDnd: () -> Unit,
     onTestAlarm: () -> Unit,
+    onTestHeyLook: () -> Unit,
+    onToggleNaviSound: (Boolean) -> Unit,
     onCopyText: (String, String) -> Unit,
     onPasteFromClipboard: () -> String?,
     onShareText: (String, String) -> Unit,
@@ -355,6 +359,8 @@ fun MainPagerApp(
                         onScanQrCode = onScanQrCode,
                         onGrantDnd = onGrantDnd,
                         onTestAlarm = onTestAlarm,
+                        onTestHeyLook = onTestHeyLook,
+                        onToggleNaviSound = onToggleNaviSound,
                         onCopyText = onCopyText,
                         onShareText = onShareText
                     )
@@ -501,6 +507,8 @@ fun RecipientSetupScreen(
     onScanQrCode: () -> Unit,
     onGrantDnd: () -> Unit,
     onTestAlarm: () -> Unit,
+    onTestHeyLook: () -> Unit,
+    onToggleNaviSound: (Boolean) -> Unit,
     onCopyText: (String, String) -> Unit,
     onShareText: (String, String) -> Unit
 ) {
@@ -728,15 +736,62 @@ fun RecipientSetupScreen(
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        Text("Sound Test", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-        Spacer(modifier = Modifier.height(8.dp))
-        OutlinedButton(
-            onClick = onTestAlarm,
-            modifier = Modifier.fillMaxWidth()
+        // Notification Sound Settings Card
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFFF3E5F5))
         ) {
-            Icon(Icons.Default.NotificationsActive, contentDescription = null)
-            Spacer(modifier = Modifier.width(8.dp))
-            Text("Test Emergency Alarm Sound")
+            Column(modifier = Modifier.padding(16.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("🧚 Navi \"Hey Look!\" Sound", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color(0xFF6A1B9A))
+                        Text(
+                            "Play Navi's iconic voice clip when receiving a 'Hey Look!' page. If off, plays system notification sound.",
+                            fontSize = 12.sp,
+                            color = Color.DarkGray
+                        )
+                    }
+                    Switch(
+                        checked = uiState.isNaviSoundEnabled,
+                        onCheckedChange = onToggleNaviSound,
+                        colors = SwitchDefaults.colors(checkedThumbColor = Color(0xFF6A1B9A), checkedTrackColor = Color(0xFFCE93D8))
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+                HorizontalDivider(color = Color(0xFFE1BEE7))
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Text("Sound Tests", fontWeight = FontWeight.SemiBold, fontSize = 14.sp, color = Color(0xFF4A148C))
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = onTestHeyLook,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(Icons.Default.Visibility, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Test Hey Look!", fontSize = 12.sp)
+                    }
+
+                    OutlinedButton(
+                        onClick = onTestAlarm,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(Icons.Default.NotificationsActive, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Test SOS Alarm", fontSize = 12.sp)
+                    }
+                }
+            }
         }
 
         Spacer(modifier = Modifier.height(24.dp))

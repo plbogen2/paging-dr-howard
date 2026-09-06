@@ -33,6 +33,7 @@ data class MainUiState(
     val appVersion: String = "1.0.0",
     val cooldowns: Map<String, Int> = emptyMap(),
     val lastAckedContacts: Map<String, Long> = emptyMap(),
+    val isNaviSoundEnabled: Boolean = true,
     val errorMessage: String? = null,
     val successMessage: String? = null
 )
@@ -55,6 +56,7 @@ class MainViewModel(private val repository: PagerRepository) : ViewModel() {
         val contacts = repository.getPairedContacts()
         val acks = contacts.associate { it.topicId to repository.getLastContactAck(it.topicId) }
             .filterValues { it > 0L }
+        val naviSound = repository.isNaviSoundEnabled()
         
         val pairingCode = PairingPayload.generatePairingCode(name, topicId, pubKey, passphrase, serverUrl)
 
@@ -66,10 +68,15 @@ class MainViewModel(private val repository: PagerRepository) : ViewModel() {
             familyPassphrase = passphrase,
             relayServerUrl = serverUrl,
             pairedContacts = contacts,
-            lastAckedContacts = acks
+            lastAckedContacts = acks,
+            isNaviSoundEnabled = naviSound
         )
     }
 
+    fun setNaviSoundEnabled(enabled: Boolean) {
+        repository.setNaviSoundEnabled(enabled)
+        uiState = uiState.copy(isNaviSoundEnabled = enabled)
+    }
     
     fun setDndGranted(granted: Boolean) {
         uiState = uiState.copy(isDndAccessGranted = granted)

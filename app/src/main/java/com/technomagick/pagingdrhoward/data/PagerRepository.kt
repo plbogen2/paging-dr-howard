@@ -27,6 +27,8 @@ interface PagerRepository {
     fun getDismissedMessageKeys(): Set<String>
     fun recordContactAck(topicId: String, timestamp: Long)
     fun getLastContactAck(topicId: String): Long
+    fun isNaviSoundEnabled(): Boolean
+    fun setNaviSoundEnabled(enabled: Boolean)
 }
 
 class DefaultPagerRepository(private val sharedPreferences: SharedPreferences) : PagerRepository {
@@ -187,6 +189,14 @@ class DefaultPagerRepository(private val sharedPreferences: SharedPreferences) :
         return sharedPreferences.getLong(KEY_PREFIX_LAST_ACK + topicId, 0L)
     }
 
+    override fun isNaviSoundEnabled(): Boolean {
+        return sharedPreferences.getBoolean(KEY_NAVI_SOUND_ENABLED, true)
+    }
+
+    override fun setNaviSoundEnabled(enabled: Boolean) {
+        sharedPreferences.edit().putBoolean(KEY_NAVI_SOUND_ENABLED, enabled).apply()
+    }
+
     companion object {
         const val PREF_NAME = "pager_prefs"
         const val KEY_MY_TOPIC_ID = "my_topic_id"
@@ -201,6 +211,7 @@ class DefaultPagerRepository(private val sharedPreferences: SharedPreferences) :
         const val KEY_DISMISSED_MESSAGE_KEYS = "dismissed_message_keys"
         const val KEY_PREFIX_LAST_ACK = "last_ack_"
         const val KEY_LAST_ACK_UPDATE = "last_ack_update_signal"
+        const val KEY_NAVI_SOUND_ENABLED = "navi_sound_enabled"
         const val DEFAULT_RELAY_SERVER_URL = "https://paging-dr-howard-default-rtdb.firebaseio.com/"
     }
 

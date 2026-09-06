@@ -34,10 +34,29 @@ object AudioPlayer {
             val targetVolume = if (level == PageLevel.SOS) maxVolume else (maxVolume * 0.75).toInt()
             audioManager.setStreamVolume(AudioManager.STREAM_ALARM, targetVolume, 0)
 
-            val alarmType = if (level == PageLevel.HEY_LOOK) RingtoneManager.TYPE_NOTIFICATION else RingtoneManager.TYPE_ALARM
-            var alarmUri: Uri? = RingtoneManager.getDefaultUri(alarmType)
+            val prefs = context.getSharedPreferences(com.technomagick.pagingdrhoward.data.DefaultPagerRepository.PREF_NAME, Context.MODE_PRIVATE)
+            val repo = com.technomagick.pagingdrhoward.data.DefaultPagerRepository(prefs)
+            val useNavi = repo.isNaviSoundEnabled()
+
+            var customResId: Int? = null
+            if (level == PageLevel.HEY_LOOK) {
+                if (useNavi) {
+                    val naviRes = context.resources.getIdentifier("navi_hey_listen", "raw", context.packageName)
+                    if (naviRes != 0) customResId = naviRes
+                }
+            } else {
+                val sirenRes = context.resources.getIdentifier("pager_siren", "raw", context.packageName)
+                if (sirenRes != 0) customResId = sirenRes
+            }
+
+            var alarmUri: Uri? = null
+            if (customResId != null) {
+                alarmUri = Uri.parse("android.resource://${context.packageName}/$customResId")
+            }
+
             if (alarmUri == null) {
-                alarmUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
+                val alarmType = if (level == PageLevel.HEY_LOOK) RingtoneManager.TYPE_NOTIFICATION else RingtoneManager.TYPE_ALARM
+                alarmUri = RingtoneManager.getDefaultUri(alarmType) ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
             }
 
             mediaPlayer = MediaPlayer().apply {
@@ -52,7 +71,7 @@ object AudioPlayer {
                 prepare()
                 start()
             }
-            Log.d(TAG, "Audio started for ${level.name} at volume: $targetVolume")
+            Log.d(TAG, "Audio started for ${level.name} (uri=$alarmUri) at volume: $targetVolume")
 
             // Schedule safety auto-stop after 60 seconds so alarm doesn't loop infinitely if unattended
             autoStopRunnable?.let { autoStopHandler.removeCallbacks(it) }
