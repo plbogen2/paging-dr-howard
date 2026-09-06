@@ -33,8 +33,7 @@ data class MainUiState(
     val appVersion: String = "1.0.0",
     val cooldowns: Map<String, Int> = emptyMap(),
     val errorMessage: String? = null,
-    val successMessage: String? = null,
-    val isLoggingEnabled: Boolean = false
+    val successMessage: String? = null
 )
 
 class MainViewModel(private val repository: PagerRepository) : ViewModel() {
@@ -53,8 +52,7 @@ class MainViewModel(private val repository: PagerRepository) : ViewModel() {
         val passphrase = repository.getFamilyPassphrase()
         val serverUrl = repository.getRelayServerUrl()
         val contacts = repository.getPairedContacts()
-        val loggingEnabled = repository.isLoggingEnabled()
-
+        
         val pairingCode = PairingPayload.generatePairingCode(name, topicId, pubKey, passphrase, serverUrl)
 
         uiState = uiState.copy(
@@ -64,16 +62,11 @@ class MainViewModel(private val repository: PagerRepository) : ViewModel() {
             myPairingCode = pairingCode,
             familyPassphrase = passphrase,
             relayServerUrl = serverUrl,
-            pairedContacts = contacts,
-            isLoggingEnabled = loggingEnabled
+            pairedContacts = contacts
         )
     }
 
-    fun setLoggingEnabled(enabled: Boolean) {
-        repository.setLoggingEnabled(enabled)
-        uiState = uiState.copy(isLoggingEnabled = enabled)
-    }
-
+    
     fun setDndGranted(granted: Boolean) {
         uiState = uiState.copy(isDndAccessGranted = granted)
     }
@@ -206,9 +199,9 @@ class MainViewModel(private val repository: PagerRepository) : ViewModel() {
         currentMap[topicId] = durationSeconds
         uiState = uiState.copy(cooldowns = currentMap)
 
-        androidx.lifecycle.viewModelScope.launch(kotlinx.coroutines.Dispatchers.Main) {
+        viewModelScope.launch(Dispatchers.Main) {
             for (sec in (durationSeconds - 1) downTo 0) {
-                kotlinx.coroutines.delay(1000)
+                delay(1000)
                 val updated = uiState.cooldowns.toMutableMap()
                 if (sec > 0) {
                     updated[topicId] = sec

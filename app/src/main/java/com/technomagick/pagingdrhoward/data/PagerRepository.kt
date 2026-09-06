@@ -19,8 +19,7 @@ interface PagerRepository {
     fun saveRelayServerUrl(url: String)
     fun getPairedContacts(): List<PairedContact>
     fun savePairedContact(contact: PairedContact)
-    fun saveFcmToken(token: String)
-    fun getFcmToken(): String?
+    fun deletePairedContact(contactId: String)
 }
 
 class DefaultPagerRepository(private val sharedPreferences: SharedPreferences) : PagerRepository {
