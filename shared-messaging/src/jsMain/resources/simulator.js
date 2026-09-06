@@ -201,28 +201,68 @@ class PagerCoreEngine {
   }
 }
 
+// Persistence Helpers
+    const STORAGE_KEY = "pdh_simulator_state_v1";
+
+    function loadSavedState() {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (raw) return JSON.parse(raw);
+      } catch (e) {
+        console.error("Failed to load simulator state from localStorage", e);
+      }
+      return null;
+    }
+
+    function saveSimState() {
+      try {
+        const state = {
+          topicA,
+          topicB,
+          phoneA: {
+            name: phoneA.name,
+            topic: phoneA.topic,
+            contacts: phoneA.contacts
+          },
+          phoneB: {
+            name: phoneB.name,
+            topic: phoneB.topic,
+            contacts: phoneB.contacts
+          }
+        };
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      } catch (e) {
+        console.error("Failed to save simulator state to localStorage", e);
+      }
+    }
+
 // State
     let relayBase = "https://paging-dr-howard-default-rtdb.firebaseio.com";
-    let topicA = 'pdh_sim_a_' + Math.random().toString(36).substring(2, 9);
-    let topicB = 'pdh_sim_b_' + Math.random().toString(36).substring(2, 9);
+    const savedState = loadSavedState();
+
+    let topicA = savedState?.topicA || ('pdh_sim_a_' + Math.random().toString(36).substring(2, 9));
+    let topicB = savedState?.topicB || ('pdh_sim_b_' + Math.random().toString(36).substring(2, 9));
 
     let phoneA = {
-      name: "Dad",
-      topic: topicA,
-      contacts: {},
+      name: savedState?.phoneA?.name || "Dad",
+      topic: savedState?.phoneA?.topic || topicA,
+      contacts: savedState?.phoneA?.contacts || {},
       eventSource: null,
       activeAlertSenderTopic: null,
-      engine: new PagerCoreEngine(topicA, "Dad", relayBase, Date.now())
+      engine: new PagerCoreEngine(savedState?.phoneA?.topic || topicA, savedState?.phoneA?.name || "Dad", relayBase, Date.now())
     };
 
     let phoneB = {
-      name: "Daughter",
-      topic: topicB,
-      contacts: {},
+      name: savedState?.phoneB?.name || "Daughter",
+      topic: savedState?.phoneB?.topic || topicB,
+      contacts: savedState?.phoneB?.contacts || {},
       eventSource: null,
       activeAlertSenderTopic: null,
-      engine: new PagerCoreEngine(topicB, "Daughter", relayBase, Date.now())
+      engine: new PagerCoreEngine(savedState?.phoneB?.topic || topicB, savedState?.phoneB?.name || "Daughter", relayBase, Date.now())
     };
+
+    // Save initial state so topics stay persistent across reloads immediately
+    saveSimState();
 
     // Cooldown management
     const cooldowns = {
@@ -426,6 +466,7 @@ class PagerCoreEngine {
         topicId: parsedTopic
       };
 
+      saveSimState();
       renderContacts(phoneKey, phoneObj);
       logDevice(phoneKey, `➕ [PAIRED CONTACT] "${name}" (${parsedTopic})`, "text-emerald-400 font-bold");
       
@@ -509,6 +550,7 @@ class PagerCoreEngine {
             name: event.senderName,
             topicId: event.senderTopicId
           };
+          saveSimState();
           renderContacts(recipientKey, recipientObj);
           logDevice(recipientKey, `   ✔ Added "${event.senderName}" to address book!`, "text-emerald-400 font-bold");
           purgeMsg(event.messageKey);
@@ -524,6 +566,7 @@ class PagerCoreEngine {
           if (recipientObj.contacts[event.senderTopicId]) {
             const old = recipientObj.contacts[event.senderTopicId].name;
             recipientObj.contacts[event.senderTopicId].name = event.newName;
+            saveSimState();
             renderContacts(recipientKey, recipientObj);
             logDevice(recipientKey, `   ✔ Updated contact name from "${old}" to "${event.newName}"!`, "text-emerald-400 font-bold");
           } else {
@@ -531,6 +574,7 @@ class PagerCoreEngine {
               name: event.newName,
               topicId: event.senderTopicId
             };
+            saveSimState();
             renderContacts(recipientKey, recipientObj);
             logDevice(recipientKey, `   ✔ Saved new contact "${event.newName}"!`, "text-emerald-400 font-bold");
           }
@@ -712,6 +756,7 @@ class PagerCoreEngine {
       logDevice(initiatorKey, `📷 [PAIRING] Scanned QR code of "${target.name}"`, "text-indigo-400 font-bold");
 
       initiator.contacts[target.topic] = { name: target.name, topicId: target.topic };
+      saveSimState();
       renderContacts(initiatorKey, initiator);
 
       const handshake = initiator.engine.buildPairingPayload(false, Date.now());
@@ -725,6 +770,7 @@ class PagerCoreEngine {
       
       phoneA.contacts[phoneB.topic] = { name: phoneB.name, topicId: phoneB.topic };
       phoneB.contacts[phoneA.topic] = { name: phoneA.name, topicId: phoneA.topic };
+      saveSimState();
       renderContacts('phoneA', phoneA);
       renderContacts('phoneB', phoneB);
 
@@ -769,12 +815,17 @@ class PagerCoreEngine {
     function initUI() {
       document.getElementById('phoneA_topic').textContent = `Topic: ${phoneA.topic}`;
       document.getElementById('phoneB_topic').textContent = `Topic: ${phoneB.topic}`;
+      document.getElementById('phoneA_name').value = phoneA.name;
+      document.getElementById('phoneB_name').value = phoneB.name;
+      document.getElementById('logHeaderA').textContent = `Phone A (${phoneA.name}) Log`;
+      document.getElementById('logHeaderB').textContent = `Phone B (${phoneB.name}) Log`;
 
       const handleNameChange = (phoneKey, newName) => {
         const phoneObj = phoneKey === 'phoneA' ? phoneA : phoneB;
         const oldName = phoneObj.name;
         phoneObj.name = newName.trim() || (phoneKey === 'phoneA' ? "Dad" : "Daughter");
         phoneObj.engine.myName = phoneObj.name;
+        saveSimState();
         const headerId = phoneKey === 'phoneA' ? 'logHeaderA' : 'logHeaderB';
         document.getElementById(headerId).textContent = `Phone ${phoneKey === 'phoneA' ? 'A' : 'B'} (${phoneObj.name}) Log`;
         logDevice(phoneKey, `✏ Renamed from "${oldName}" to "${phoneObj.name}". Broadcasting NAME_UPDATE...`, "text-cyan-300 font-bold");
@@ -809,6 +860,7 @@ class PagerCoreEngine {
         phoneB.engine = new PagerCoreEngine(topicB, phoneB.name, relayBase, Date.now());
         phoneA.contacts = {};
         phoneB.contacts = {};
+        saveSimState();
         phoneA.activeAlertSenderTopic = null;
         phoneB.activeAlertSenderTopic = null;
         cooldowns.phoneA = {};
