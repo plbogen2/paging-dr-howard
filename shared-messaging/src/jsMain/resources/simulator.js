@@ -256,6 +256,9 @@
       if (phoneObj.dbRef) {
         phoneObj.dbRef.off();
       }
+      if (!phoneObj.dismissedAlertKeys) {
+        phoneObj.dismissedAlertKeys = new Set();
+      }
       const cleanTopic = phoneObj.topic.replace(/[^a-zA-Z0-9_-]/g, '_');
       const channelRef = db.ref(`channels/${cleanTopic}`);
       phoneObj.dbRef = channelRef;
@@ -276,6 +279,10 @@
           return;
         }
         if (payload.senderTopicId === phoneObj.topic) {
+          channelRef.child(msgKey).remove().catch(() => {});
+          return;
+        }
+        if (phoneObj.dismissedAlertKeys.has(msgKey)) {
           channelRef.child(msgKey).remove().catch(() => {});
           return;
         }
@@ -393,6 +400,8 @@
 
       // Purge active alert page from Firebase RTDB now that user acknowledged/dismissed
       if (phoneObj.activeAlertMsgKey) {
+        if (!phoneObj.dismissedAlertKeys) phoneObj.dismissedAlertKeys = new Set();
+        phoneObj.dismissedAlertKeys.add(phoneObj.activeAlertMsgKey);
         const cleanTopic = phoneObj.topic.replace(/[^a-zA-Z0-9_-]/g, '_');
         db.ref(`channels/${cleanTopic}/${phoneObj.activeAlertMsgKey}`).remove().catch(() => {});
         phoneObj.activeAlertMsgKey = null;

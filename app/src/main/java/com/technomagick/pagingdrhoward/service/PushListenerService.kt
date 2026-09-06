@@ -111,6 +111,13 @@ class PushListenerService : Service() {
                     if (type == "put" || type == "patch" || json.has("data")) {
                         val path = json.optString("path", "")
                         val innerData = json.opt("data")
+
+                        // If data is null or empty, this is a deletion event from RTDB (e.g. DELETE /channels/topic/key.json)
+                        if (innerData == null || innerData == JSONObject.NULL) {
+                            Log.d(TAG, "RTDB node deleted: $path")
+                            return
+                        }
+
                         if (innerData is JSONObject) {
                             if (innerData.has("type")) {
                                 val key = path.removePrefix("/").trim()
@@ -186,20 +193,25 @@ class PushListenerService : Service() {
             val signature = json.optString("signature", "")
             val pageLevel = PageLevel.fromCode(levelCode)
 
-            // Drop self-echo messages (e.g. if sending to a shared topic or looped relay)
-            if (senderTopicId.isNotBlank() && senderTopicId == repository.getMyTopicId()) {
-                Log.d(TAG, "Ignored self-echo message from topic: $senderTopicId")
-                if (!messageKey.isNullOrBlank()) {
-                    PushSender.deleteMessage(repository.getRelayServerUrl(), repository.getMyTopicId(), messageKey)
-                }
-                return
-            }
-
             // Helper to clean up message from RTDB if key is known
             fun purgeThisMessage() {
                 if (!messageKey.isNullOrBlank()) {
                     PushSender.deleteMessage(repository.getRelayServerUrl(), repository.getMyTopicId(), messageKey)
                 }
+            }
+
+            // Check if this exact message was already dismissed by user
+            if (!messageKey.isNullOrBlank() && repository.isMessageDismissed(messageKey)) {
+                Log.d(TAG, "Ignored already dismissed message key: $messageKey, purging...")
+                purgeThisMessage()
+                return
+            }
+
+            // Drop self-echo messages (e.g. if sending to a shared topic or looped relay)
+            if (senderTopicId.isNotBlank() && senderTopicId == repository.getMyTopicId()) {
+                Log.d(TAG, "Ignored self-echo message from topic: $senderTopicId")
+                purgeThisMessage()
+                return
             }
 
             // Replay protection: Ignore messages older than 10 minutes or future timestamps > 10 minutes off

@@ -61,6 +61,8 @@ class EmergencyAlertActivity : ComponentActivity() {
     }
 
     private fun dismissPage(senderTopic: String, alertTimestamp: Long, messageKey: String = "") {
+        // Immediately silence audio and stop emergency pager service
+        com.technomagick.pagingdrhoward.util.AudioPlayer.stopEmergencyAlarm(this)
         val stopServiceIntent = Intent(this, EmergencyPagerService::class.java).apply {
             action = EmergencyPagerService.ACTION_STOP_ALARM
         }
@@ -69,9 +71,12 @@ class EmergencyAlertActivity : ComponentActivity() {
         val prefs = getSharedPreferences(com.technomagick.pagingdrhoward.data.DefaultPagerRepository.PREF_NAME, MODE_PRIVATE)
         val repository = com.technomagick.pagingdrhoward.data.DefaultPagerRepository(prefs)
 
-        // Persist dismissed timestamp so replayed SSE events for this page or earlier are permanently ignored
+        // Persist dismissed timestamp and message key so replayed SSE events for this page or earlier are permanently ignored
         val effectiveDismissTimestamp = maxOf(alertTimestamp, System.currentTimeMillis())
         repository.saveLastDismissedAlertTimestamp(effectiveDismissTimestamp)
+        if (messageKey.isNotBlank()) {
+            repository.markMessageDismissed(messageKey)
+        }
 
         // Purge the emergency alert message from Firebase RTDB now that user acknowledged/dismissed
         if (messageKey.isNotBlank()) {

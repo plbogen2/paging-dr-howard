@@ -22,6 +22,8 @@ interface PagerRepository {
     fun deletePairedContact(contactId: String)
     fun getLastDismissedAlertTimestamp(): Long
     fun saveLastDismissedAlertTimestamp(timestamp: Long)
+    fun isMessageDismissed(messageKey: String): Boolean
+    fun markMessageDismissed(messageKey: String)
 }
 
 class DefaultPagerRepository(private val sharedPreferences: SharedPreferences) : PagerRepository {
@@ -146,6 +148,25 @@ class DefaultPagerRepository(private val sharedPreferences: SharedPreferences) :
         }
     }
 
+    override fun isMessageDismissed(messageKey: String): Boolean {
+        if (messageKey.isBlank()) return false
+        val keys = sharedPreferences.getStringSet(KEY_DISMISSED_MESSAGE_KEYS, emptySet()) ?: emptySet()
+        return keys.contains(messageKey)
+    }
+
+    override fun markMessageDismissed(messageKey: String) {
+        if (messageKey.isBlank()) return
+        val current = (sharedPreferences.getStringSet(KEY_DISMISSED_MESSAGE_KEYS, emptySet()) ?: emptySet()).toMutableSet()
+        current.add(messageKey)
+        // Keep set size bounded to 100 most recent dismissed keys
+        if (current.size > 100) {
+            val pruned = current.takeLast(100).toSet()
+            sharedPreferences.edit().putStringSet(KEY_DISMISSED_MESSAGE_KEYS, pruned).apply()
+        } else {
+            sharedPreferences.edit().putStringSet(KEY_DISMISSED_MESSAGE_KEYS, current).apply()
+        }
+    }
+
     companion object {
         const val PREF_NAME = "pager_prefs"
         const val KEY_MY_TOPIC_ID = "my_topic_id"
@@ -157,6 +178,7 @@ class DefaultPagerRepository(private val sharedPreferences: SharedPreferences) :
         const val KEY_PAIRED_CONTACTS = "paired_contacts"
         const val KEY_LOG_ENABLED = "log_enabled"
         const val KEY_LAST_DISMISSED_ALERT_TIMESTAMP = "last_dismissed_alert_timestamp"
+        const val KEY_DISMISSED_MESSAGE_KEYS = "dismissed_message_keys"
         const val DEFAULT_RELAY_SERVER_URL = "https://paging-dr-howard-default-rtdb.firebaseio.com/"
     }
 
