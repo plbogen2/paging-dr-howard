@@ -91,6 +91,7 @@ class EmergencyPagerService : Service() {
         }
 
         AudioPlayer.startEmergencyAlarm(this, pageLevel)
+        fullScreenIntent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
         startActivity(fullScreenIntent)
 
         return START_STICKY

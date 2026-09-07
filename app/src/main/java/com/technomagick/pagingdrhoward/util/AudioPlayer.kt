@@ -68,8 +68,12 @@ object AudioPlayer {
                         .build()
                 )
                 isLooping = level.isLoopingSound
-                prepare()
-                start()
+                setOnPreparedListener { it.start() }
+                setOnErrorListener { _, what, extra ->
+                    Log.e(TAG, "MediaPlayer error: what=$what extra=$extra")
+                    false
+                }
+                prepareAsync()
             }
             Log.d(TAG, "Audio started for ${level.name} (uri=$alarmUri) at volume: $targetVolume")
 
