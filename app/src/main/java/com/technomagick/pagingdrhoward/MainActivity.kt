@@ -15,19 +15,27 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.material3.dynamicDarkColorScheme
+import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.technomagick.pagingdrhoward.data.DefaultPagerRepository
@@ -45,6 +53,40 @@ import com.technomagick.pagingdrhoward.viewmodel.MainViewModel
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 
+// ─── Semantic safety colors — intentionally NOT from the dynamic palette ───────
+private val SosRed    = Color(0xFFD32F2F)
+private val HeyLookAmber = Color(0xFFF57C00)
+private val SosRedContainer    = Color(0xFFFFEBEE)
+private val HeyLookAmberContainer = Color(0xFFFFF3E0)
+
+// ─── Material You Theme ────────────────────────────────────────────────────────
+@Composable
+fun PagingDrHowardTheme(content: @Composable () -> Unit) {
+    val context = LocalContext.current
+    val darkTheme = isSystemInDarkTheme()
+
+    val colorScheme = when {
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
+            if (darkTheme) dynamicDarkColorScheme(context)
+            else dynamicLightColorScheme(context)
+        }
+        darkTheme -> darkColorScheme(
+            primary = Color(0xFFEF5350),
+            onPrimary = Color.White,
+            primaryContainer = Color(0xFF8B0000),
+            secondary = Color(0xFFFFB74D),
+        )
+        else -> lightColorScheme(
+            primary = Color(0xFFD32F2F),
+            onPrimary = Color.White,
+            primaryContainer = Color(0xFFFFCDD2),
+            secondary = Color(0xFFF57C00),
+        )
+    }
+
+    MaterialTheme(colorScheme = colorScheme, content = content)
+}
+
 class MainActivity : ComponentActivity() {
 
     private lateinit var viewModel: MainViewModel
@@ -58,76 +100,35 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private val scanQrLauncher = registerForActivityResult(ScanContract()) { result ->
+    private val qrScanLauncher = registerForActivityResult(ScanContract()) { result ->
         if (result.contents != null) {
             val code = result.contents.trim()
             if (viewModel.importPairingCode(code)) {
-                Toast.makeText(this, "Device paired successfully!", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "Device successfully paired!", Toast.LENGTH_SHORT).show()
             } else {
-                Toast.makeText(this, "Invalid pairing QR code. Please ensure it's from Paging Dr. Howard.", Toast.LENGTH_LONG).show()
+                Toast.makeText(this, "Invalid QR code. Make sure to scan the correct pairing screen.", Toast.LENGTH_LONG).show()
             }
         }
-    }
-
-    private fun launchQrScanner() {
-        val options = ScanOptions().apply {
-            setDesiredBarcodeFormats(ScanOptions.QR_CODE)
-            setPrompt("Point camera at the pairing QR code on the other device")
-            setCameraId(0)
-            setBeepEnabled(true)
-            setBarcodeImageEnabled(false)
-            setOrientationLocked(false)
-        }
-        scanQrLauncher.launch(options)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        val prefs = getSharedPreferences(DefaultPagerRepository.PREF_NAME, MODE_PRIVATE)
-        val repository = DefaultPagerRepository(prefs)
-        viewModel = MainViewModel(repository)
+        viewModel = MainViewModel(application)
+        viewModel.loadSettings()
 
-        // Observe shared preferences for background pairing handshake updates
+        val prefs = getSharedPreferences(DefaultPagerRepository.PREF_NAME, Context.MODE_PRIVATE)
         prefs.registerOnSharedPreferenceChangeListener(prefListener)
 
-        // Initialize DND channel & start background push listener service
-        DndHelper.createEmergencyNotificationChannel(this)
         startPushListenerService()
 
-        // Check for app updates from GitHub releases
-        val (currentBuildNumber, currentVersionName) = try {
-            val pInfo = packageManager.getPackageInfo(packageName, 0)
-            val code = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                pInfo.longVersionCode.toInt()
-            } else {
-                @Suppress("DEPRECATION")
-                pInfo.versionCode
-            }
-            val name = pInfo.versionName ?: "1.0.0.$code"
-            Pair(code, name)
-        } catch (e: Exception) {
-            Pair(1001, "1.0.0.1001")
-        }
-
-        viewModel.setAppVersion(currentVersionName)
-
-        AppUpdateManager.checkForUpdate(currentBuildNumber) { updateInfo ->
-            if (updateInfo != null && updateInfo.hasUpdate) {
-                runOnUiThread {
-                    viewModel.setUpdateInfo(updateInfo)
-                }
-            }
-        }
-
         setContent {
-            MaterialTheme {
+            PagingDrHowardTheme {
                 MainPagerApp(
                     uiState = viewModel.uiState,
                     onUpdateMyName = { name -> viewModel.updateMyName(name) },
                     onUpdateRelayServerUrl = { url ->
                         viewModel.updateRelayServerUrl(url)
-                        // startPushListenerService() removed – FCM handles push
                     },
                     onImportPairingCode = { code -> viewModel.importPairingCode(code) },
                     onDeleteContact = { id -> viewModel.deleteContact(id) },
@@ -163,31 +164,32 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
-        val prefs = getSharedPreferences(DefaultPagerRepository.PREF_NAME, MODE_PRIVATE)
+        val prefs = getSharedPreferences(DefaultPagerRepository.PREF_NAME, Context.MODE_PRIVATE)
         prefs.unregisterOnSharedPreferenceChangeListener(prefListener)
     }
 
     private fun startPushListenerService() {
-        val serviceIntent = Intent(this, PushListenerService::class.java).apply {
-            action = PushListenerService.ACTION_START_LISTENING
-        }
         try {
+            val intent = Intent(this, PushListenerService::class.java)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                startForegroundService(serviceIntent)
+                startForegroundService(intent)
             } else {
-                startService(serviceIntent)
+                startService(intent)
             }
         } catch (e: Exception) {
-            // Ignored
+            LogHelper.e("MainActivity", "Failed to start push listener service", e)
         }
     }
 
     private fun triggerLocalTestPage(level: PageLevel = PageLevel.SOS) {
+        val prefs = getSharedPreferences(DefaultPagerRepository.PREF_NAME, Context.MODE_PRIVATE)
+        val repository = DefaultPagerRepository(prefs)
         val intent = Intent(this, EmergencyPagerService::class.java).apply {
             action = EmergencyPagerService.ACTION_START_ALARM
-            putExtra("EXTRA_SENDER", "Self-Test")
-            putExtra("EXTRA_MESSAGE", if (level == PageLevel.HEY_LOOK) "Testing Hey Look! notification sound" else "This is a test of the emergency alarm sound!")
+            putExtra("EXTRA_SENDER", "Test Page")
+            putExtra("EXTRA_MESSAGE", if (level == PageLevel.HEY_LOOK) "Hey Look! 👀 Test" else "URGENT: This is a test alarm!")
             putExtra("EXTRA_LEVEL", level.code)
+            putExtra("EXTRA_TIMESTAMP", System.currentTimeMillis())
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             startForegroundService(intent)
@@ -196,20 +198,66 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun launchQrScanner() {
+        val options = ScanOptions().apply {
+            setDesiredBarcodeFormats(ScanOptions.QR_CODE)
+            setPrompt("Scan the family member's pairing QR code")
+            setCameraId(0)
+            setBeepEnabled(true)
+            setBarcodeImageEnabled(false)
+        }
+        qrScanLauncher.launch(options)
+    }
+
+    private fun sendRemotePage(contact: PairedContact, level: PageLevel, customMessage: String? = null) {
+        val prefs = getSharedPreferences(DefaultPagerRepository.PREF_NAME, Context.MODE_PRIVATE)
+        val repository = DefaultPagerRepository(prefs)
+
+        val senderName = repository.getMyName()
+        val myTopicId = repository.getMyTopicId()
+        val myPublicKeyBase64 = repository.getMyPublicKeyBase64()
+        val myPrivateKey = repository.getMyPrivateKey()
+        val serverUrl = repository.getRelayServerUrl()
+
+        val peerPublicKey = if (contact.publicKeyBase64.isNotBlank()) {
+            try { CryptoManager.publicKeyFromBase64(contact.publicKeyBase64) } catch (e: Exception) { null }
+        } else null
+
+        val message = customMessage?.trim()?.takeIf { it.isNotBlank() }
+            ?: if (level == PageLevel.SOS) "URGENT: Please respond immediately!" else "Hey look! 👀"
+
+        viewModel.startCooldown(contact.topicId)
+
+        Thread {
+            try {
+                PushSender.sendAlert(
+                    targetTopicId = contact.topicId,
+                    senderName = senderName,
+                    myTopicId = myTopicId,
+                    myPublicKeyBase64 = myPublicKeyBase64,
+                    myPrivateKey = myPrivateKey,
+                    peerPublicKey = peerPublicKey,
+                    level = level,
+                    message = message,
+                    serverUrl = serverUrl
+                )
+                LogHelper.i("MainActivity", "Page sent to ${contact.name} (${level.code})")
+            } catch (e: Exception) {
+                LogHelper.e("MainActivity", "Failed to send page to ${contact.name}", e)
+            }
+        }.start()
+    }
+
     private fun copyToClipboard(label: String, text: String) {
         val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         val clip = ClipData.newPlainText(label, text)
         clipboard.setPrimaryClip(clip)
-        Toast.makeText(this, "$label copied to clipboard!", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, "$label copied!", Toast.LENGTH_SHORT).show()
     }
 
     private fun getClipboardText(): String? {
         val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        val clip = clipboard.primaryClip
-        if (clip != null && clip.itemCount > 0) {
-            return clip.getItemAt(0).text?.toString()
-        }
-        return null
+        return clipboard.primaryClip?.getItemAt(0)?.text?.toString()
     }
 
     private fun shareText(title: String, text: String) {
@@ -218,48 +266,11 @@ class MainActivity : ComponentActivity() {
             putExtra(Intent.EXTRA_SUBJECT, title)
             putExtra(Intent.EXTRA_TEXT, text)
         }
-        startActivity(Intent.createChooser(intent, title))
-    }
-
-    private fun sendRemotePage(contact: PairedContact, pageLevel: PageLevel, customMessage: String? = null) {
-        try {
-            val state = viewModel.uiState
-            val peerPublicKey = if (contact.publicKeyBase64.isNotBlank()) {
-                try { CryptoManager.publicKeyFromBase64(contact.publicKeyBase64) } catch (e: Exception) { null }
-            } else null
-
-            val prefs = getSharedPreferences(DefaultPagerRepository.PREF_NAME, MODE_PRIVATE)
-            val repository = DefaultPagerRepository(prefs)
-
-            val targetServer = contact.relayServerUrl.ifBlank { repository.getRelayServerUrl() }
-
-            viewModel.startCooldown(contact.topicId, 10)
-
-            val defaultMsg = if (pageLevel == PageLevel.HEY_LOOK) "Hey look! Check your phone when free." else "EMERGENCY: Urgent assistance needed!"
-            val finalMsg = if (!customMessage.isNullOrBlank()) customMessage.trim() else defaultMsg
-
-            PushSender.sendPage(
-                targetTopicId = contact.topicId,
-                senderName = state.myName,
-                senderTopicId = state.myTopicId,
-                senderPublicKeyBase64 = state.myPublicKeyBase64,
-                senderPrivateKey = repository.getMyPrivateKey(),
-                recipientPublicKey = peerPublicKey,
-                pageLevel = pageLevel,
-                messageText = finalMsg,
-                serverUrl = targetServer,
-                onResult = { isSuccess, resultMsg ->
-                    runOnUiThread {
-                        Toast.makeText(this, resultMsg, Toast.LENGTH_LONG).show()
-                    }
-                }
-            )
-        } catch (e: Throwable) {
-            LogHelper.e("MainActivity", "Error sending page", e)
-            Toast.makeText(this, "Failed to send page: ${e.localizedMessage ?: "Unknown error"}", Toast.LENGTH_LONG).show()
-        }
+        startActivity(Intent.createChooser(intent, "Share via"))
     }
 }
+
+// ─── Shell ────────────────────────────────────────────────────────────────────
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -286,56 +297,78 @@ fun MainPagerApp(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Paging Dr. Howard 📟", fontWeight = FontWeight.Bold) },
+                title = {
+                    Text(
+                        "Paging Dr. Howard 📟",
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.titleLarge
+                    )
+                },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color(0xFFD32F2F),
-                    titleContentColor = Color.White
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    titleContentColor = MaterialTheme.colorScheme.onSurface
                 )
             )
         },
         bottomBar = {
-            NavigationBar {
+            NavigationBar(
+                containerColor = MaterialTheme.colorScheme.surfaceContainer
+            ) {
                 NavigationBarItem(
                     selected = selectedTab == 0,
                     onClick = { selectedTab = 0 },
-                    icon = { Icon(Icons.Default.People, contentDescription = "Family Contacts") },
-                    label = { Text("Family Contacts") }
+                    icon = { Icon(Icons.Default.People, contentDescription = null) },
+                    label = { Text("Contacts") }
                 )
                 NavigationBarItem(
                     selected = selectedTab == 1,
                     onClick = { selectedTab = 1 },
-                    icon = { Icon(Icons.Default.Settings, contentDescription = "Setup") },
-                    label = { Text("My Device Setup") }
+                    icon = { Icon(Icons.Default.Settings, contentDescription = null) },
+                    label = { Text("My Setup") }
                 )
             }
-        }
+        },
+        containerColor = MaterialTheme.colorScheme.background
     ) { paddingValues ->
         Column(modifier = Modifier.padding(paddingValues)) {
-            // In-App Auto-Update Banner
+
+            // Update banner
             uiState.updateInfo?.let { update ->
                 if (update.hasUpdate) {
-                    Card(
+                    ElevatedCard(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 16.dp, vertical = 8.dp),
-                        colors = CardDefaults.cardColors(containerColor = Color(0xFFE3F2FD))
+                        colors = CardDefaults.elevatedCardColors(
+                            containerColor = MaterialTheme.colorScheme.primaryContainer
+                        )
                     ) {
                         Row(
                             modifier = Modifier.padding(12.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(Icons.Default.SystemUpdate, contentDescription = null, tint = Color(0xFF1976D2))
+                            Icon(
+                                Icons.Default.SystemUpdate,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
                             Spacer(modifier = Modifier.width(12.dp))
                             Column(modifier = Modifier.weight(1f)) {
-                                Text("New Update Available: ${update.latestVersionName}", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                                Text("Tap to install latest build seamlessly.", fontSize = 11.sp, color = Color.DarkGray)
+                                Text(
+                                    "Update ${update.latestVersionName} available",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                                Text(
+                                    "Tap to install seamlessly",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
+                                )
                             }
-                            Button(
-                                onClick = { onInstallUpdate(update) },
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1976D2))
-                            ) {
-                                Text("Update", fontSize = 12.sp)
-                            }
+                            FilledTonalButton(
+                                onClick = { onInstallUpdate(update) }
+                            ) { Text("Update") }
                         }
                     }
                 }
@@ -370,6 +403,8 @@ fun MainPagerApp(
     }
 }
 
+// ─── Contacts Tab ─────────────────────────────────────────────────────────────
+
 @Composable
 fun FamilyContactsScreen(
     uiState: MainUiState,
@@ -380,122 +415,245 @@ fun FamilyContactsScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(16.dp)
+            .padding(horizontal = 16.dp)
             .verticalScroll(rememberScrollState())
     ) {
-        Text("Family Address Book", fontSize = 22.sp, fontWeight = FontWeight.Bold)
-        Text("Tap (1) Hey look! or (2) SOS to page your family members instantly.", fontSize = 14.sp, color = Color.Gray)
+        Spacer(modifier = Modifier.height(20.dp))
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Text(
+            "Contacts",
+            style = MaterialTheme.typography.headlineMedium,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onBackground
+        )
+        Text(
+            "Page your family instantly with Hey Look or SOS.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f)
+        )
 
-        Text("Paired Family Members (${uiState.pairedContacts.size})", fontWeight = FontWeight.Bold, fontSize = 18.sp)
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(20.dp))
 
         if (uiState.pairedContacts.isEmpty()) {
-            Card(
+            // Empty state
+            Spacer(modifier = Modifier.height(48.dp))
+            Column(
                 modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF8E1))
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text("📱 No Paired Family Members Yet", fontWeight = FontWeight.Bold, color = Color(0xFFF57F17), fontSize = 16.sp)
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text("To link with a family member's phone, go to the Setup tab to scan their QR code or share yours.", fontSize = 13.sp)
-                    Spacer(modifier = Modifier.height(14.dp))
-                    Button(
-                        onClick = onGoToSetupTab,
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE65100))
-                    ) {
-                        Icon(Icons.Default.Settings, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Go to Setup to Pair Devices", fontWeight = FontWeight.Bold)
-                    }
+                Box(
+                    modifier = Modifier
+                        .size(80.dp)
+                        .background(
+                            MaterialTheme.colorScheme.secondaryContainer,
+                            CircleShape
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        Icons.Default.GroupAdd,
+                        contentDescription = null,
+                        modifier = Modifier.size(40.dp),
+                        tint = MaterialTheme.colorScheme.onSecondaryContainer
+                    )
+                }
+                Spacer(modifier = Modifier.height(20.dp))
+                Text(
+                    "No contacts yet",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onBackground
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    "Pair with a family member's phone in the\nMy Setup tab to get started.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                )
+                Spacer(modifier = Modifier.height(24.dp))
+                Button(
+                    onClick = onGoToSetupTab,
+                    shape = RoundedCornerShape(50)
+                ) {
+                    Icon(Icons.Default.Settings, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Go to My Setup", fontWeight = FontWeight.SemiBold)
                 }
             }
         } else {
             uiState.pairedContacts.forEach { contact ->
-                Card(
+                ContactCard(
+                    contact = contact,
+                    cooldown = uiState.cooldowns[contact.topicId] ?: 0,
+                    isRecentlyAcked = run {
+                        val lastAck = uiState.lastAckedContacts[contact.topicId] ?: 0L
+                        (System.currentTimeMillis() - lastAck) < 600_000L
+                    },
+                    onDelete = { onDeleteContact(contact.id) },
+                    onPage = { level, msg -> onPageContact(contact, level, msg) }
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+            }
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+    }
+}
+
+@Composable
+fun ContactCard(
+    contact: PairedContact,
+    cooldown: Int,
+    isRecentlyAcked: Boolean,
+    onDelete: () -> Unit,
+    onPage: (PageLevel, String?) -> Unit
+) {
+    val isCoolingDown = cooldown > 0
+    var customMessage by remember(contact.topicId) { mutableStateOf("") }
+
+    ElevatedCard(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.elevatedCardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+        ),
+        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+
+            // Header row: avatar + name + delete
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Avatar circle with initials
+                Box(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 6.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF3E0))
+                        .size(48.dp)
+                        .background(
+                            MaterialTheme.colorScheme.primaryContainer,
+                            CircleShape
+                        ),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column {
-                                Text(contact.name, fontWeight = FontWeight.Bold, fontSize = 20.sp, color = Color(0xFFE65100))
-                                val lastAck = uiState.lastAckedContacts[contact.topicId] ?: 0L
-                                val isRecentlyAcked = (System.currentTimeMillis() - lastAck) < 600_000L // within 10 mins
-                                if (isRecentlyAcked) {
-                                    Text("✔ Page Acknowledged", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF2E7D32))
-                                }
-                            }
-                            IconButton(onClick = { onDeleteContact(contact.id) }) {
-                                Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color.Gray)
-                            }
-                        }
+                    Text(
+                        text = contact.name.take(1).uppercase(),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                }
 
-                        Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.width(12.dp))
 
-                        var customMessage by remember(contact.topicId) { mutableStateOf("") }
-
-                        OutlinedTextField(
-                            value = customMessage,
-                            onValueChange = { customMessage = it },
-                            placeholder = { Text("Optional message (e.g. Call me, dinner ready...)", fontSize = 12.sp) },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth()
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = contact.name,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    if (isRecentlyAcked) {
+                        Text(
+                            "✔ Page acknowledged",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color(0xFF2E7D32),
+                            fontWeight = FontWeight.Medium
                         )
-
-                        Spacer(modifier = Modifier.height(10.dp))
-
-                        val cooldown = uiState.cooldowns[contact.topicId] ?: 0
-                        val isCoolingDown = cooldown > 0
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            // Level 1: Hey look!
-                            Button(
-                                onClick = { onPageContact(contact, PageLevel.HEY_LOOK, customMessage) },
-                                enabled = !isCoolingDown,
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = Color(PageLevel.HEY_LOOK.colorHex),
-                                    disabledContainerColor = Color.LightGray
-                                ),
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Icon(Icons.Default.Visibility, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(if (isCoolingDown) "Wait (${cooldown}s)" else "Hey Look!", fontSize = 13.sp)
-                            }
-
-                            // Level 2: SOS
-                            Button(
-                                onClick = { onPageContact(contact, PageLevel.SOS, customMessage) },
-                                enabled = !isCoolingDown,
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = Color(PageLevel.SOS.colorHex),
-                                    disabledContainerColor = Color.LightGray
-                                ),
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Icon(Icons.Default.NotificationsActive, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(if (isCoolingDown) "Wait (${cooldown}s)" else "SOS", fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                            }
-                        }
                     }
+                }
+
+                IconButton(onClick = onDelete) {
+                    Icon(
+                        Icons.Default.Delete,
+                        contentDescription = "Remove contact",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Optional message input
+            OutlinedTextField(
+                value = customMessage,
+                onValueChange = { customMessage = it },
+                placeholder = {
+                    Text(
+                        "Optional message…",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                textStyle = MaterialTheme.typography.bodyMedium,
+                colors = OutlinedTextFieldDefaults.colors(
+                    unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
+                    focusedBorderColor = MaterialTheme.colorScheme.primary
+                )
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Action buttons — pill shaped, semantic colors
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                // Hey Look — amber
+                Button(
+                    onClick = { onPage(PageLevel.HEY_LOOK, customMessage) },
+                    enabled = !isCoolingDown,
+                    shape = RoundedCornerShape(50),
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = HeyLookAmber,
+                        contentColor = Color.White,
+                        disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                        disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                ) {
+                    Icon(Icons.Default.Visibility, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        if (isCoolingDown) "${cooldown}s" else "Hey Look!",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+
+                // SOS — red
+                Button(
+                    onClick = { onPage(PageLevel.SOS, customMessage) },
+                    enabled = !isCoolingDown,
+                    shape = RoundedCornerShape(50),
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = SosRed,
+                        contentColor = Color.White,
+                        disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                        disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                ) {
+                    Icon(Icons.Default.NotificationsActive, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        if (isCoolingDown) "${cooldown}s" else "SOS",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold
+                    )
                 }
             }
         }
     }
 }
+
+// ─── Setup Tab ────────────────────────────────────────────────────────────────
 
 @Composable
 fun RecipientSetupScreen(
@@ -512,7 +670,7 @@ fun RecipientSetupScreen(
     onCopyText: (String, String) -> Unit,
     onShareText: (String, String) -> Unit
 ) {
-    val context = androidx.compose.ui.platform.LocalContext.current
+    val context = LocalContext.current
     var nameInput by remember(uiState.myName) { mutableStateOf(uiState.myName) }
     var serverInput by remember(uiState.relayServerUrl) { mutableStateOf(uiState.relayServerUrl) }
     var pairingCodeInput by remember { mutableStateOf("") }
@@ -520,62 +678,79 @@ fun RecipientSetupScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(16.dp)
+            .padding(horizontal = 16.dp)
             .verticalScroll(rememberScrollState())
     ) {
-        Text("Device & Pairing Setup", fontSize = 22.sp, fontWeight = FontWeight.Bold)
-        Text("Configure your name, DND access, and pair phones with your family.", fontSize = 14.sp, color = Color.Gray)
+        Spacer(modifier = Modifier.height(20.dp))
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Text(
+            "My Setup",
+            style = MaterialTheme.typography.headlineMedium,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onBackground
+        )
+        Text(
+            "Configure this device and pair with family.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f)
+        )
 
-        // Push Service Status Card
-        Card(
+        Spacer(modifier = Modifier.height(20.dp))
+
+        // ── Status chips row ──────────────────────────────────────────────────
+        Row(
             modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFFE8F5E9))
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Row(
-                modifier = Modifier.padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically
+            // Push active
+            Surface(
+                shape = RoundedCornerShape(50),
+                color = MaterialTheme.colorScheme.secondaryContainer,
+                modifier = Modifier.wrapContentWidth()
             ) {
-                Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF2E7D32), modifier = Modifier.size(28.dp))
-                Spacer(modifier = Modifier.width(12.dp))
-                Column {
-                    Text("Push Listener: Active 🟢", fontWeight = FontWeight.Bold, color = Color(0xFF2E7D32))
-                    Text("Ready for instant emergency pages (Zero-Server / Zero-Firebase).", fontSize = 12.sp, color = Color.DarkGray)
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        Icons.Default.Circle,
+                        contentDescription = null,
+                        tint = Color(0xFF2E7D32),
+                        modifier = Modifier.size(8.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        "Push Active",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer
+                    )
                 }
             }
-        }
 
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // DND Access Status Card
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(
-                containerColor = if (uiState.isDndAccessGranted) Color(0xFFE8F5E9) else Color(0xFFFFEBEE)
-            )
-        ) {
-            Row(
-                modifier = Modifier.padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically
+            // DND status chip
+            val dndOk = uiState.isDndAccessGranted
+            Surface(
+                shape = RoundedCornerShape(50),
+                color = if (dndOk) MaterialTheme.colorScheme.secondaryContainer
+                        else MaterialTheme.colorScheme.errorContainer,
+                modifier = Modifier.wrapContentWidth()
             ) {
-                Icon(
-                    imageVector = if (uiState.isDndAccessGranted) Icons.Default.CheckCircle else Icons.Default.Warning,
-                    contentDescription = null,
-                    tint = if (uiState.isDndAccessGranted) Color(0xFF2E7D32) else Color(0xFFC62828),
-                    modifier = Modifier.size(32.dp)
-                )
-                Spacer(modifier = Modifier.width(16.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = if (uiState.isDndAccessGranted) "DND Override Enabled" else "DND Permission Needed",
-                        fontWeight = FontWeight.Bold,
-                        color = if (uiState.isDndAccessGranted) Color(0xFF2E7D32) else Color(0xFFC62828)
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        if (dndOk) Icons.Default.CheckCircle else Icons.Default.Warning,
+                        contentDescription = null,
+                        tint = if (dndOk) Color(0xFF2E7D32) else MaterialTheme.colorScheme.onErrorContainer,
+                        modifier = Modifier.size(14.dp)
                     )
+                    Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = if (uiState.isDndAccessGranted) "Phone will ring even during Do Not Disturb." else "Tap below to allow app to bypass DND mode.",
-                        fontSize = 12.sp,
-                        color = Color.DarkGray
+                        if (dndOk) "DND Enabled" else "DND Needed",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = if (dndOk) MaterialTheme.colorScheme.onSecondaryContainer
+                                else MaterialTheme.colorScheme.onErrorContainer
                     )
                 }
             }
@@ -586,346 +761,379 @@ fun RecipientSetupScreen(
             Button(
                 onClick = onGrantDnd,
                 modifier = Modifier.fillMaxWidth(),
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFC62828))
+                shape = RoundedCornerShape(50),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
             ) {
-                Text("Grant DND Access in Settings")
+                Icon(Icons.Default.Warning, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Grant DND Access", fontWeight = FontWeight.SemiBold)
             }
         }
 
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(20.dp))
 
-        OutlinedTextField(
-            value = nameInput,
-            onValueChange = {
-                nameInput = it
-                onUpdateMyName(it)
-            },
-            label = { Text("Your Display Name (e.g. Dad or Daughter)") },
-            modifier = Modifier.fillMaxWidth()
-        )
-
-        Spacer(modifier = Modifier.height(24.dp))
-
-        // Pair Another Family Phone Card
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFFF1F8E9))
-        ) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Text("➕ Pair with Another Phone", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color(0xFF2E7D32))
-                Text("Scan the QR code displayed on another phone, or paste their code below.", fontSize = 12.sp, color = Color.DarkGray)
-                
-                Spacer(modifier = Modifier.height(12.dp))
-                Button(
-                    onClick = onScanQrCode,
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32))
-                ) {
-                    Icon(Icons.Default.QrCodeScanner, contentDescription = null)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("📷 Scan Family Member's QR Code", fontWeight = FontWeight.Bold)
+        // ── Display name ──────────────────────────────────────────────────────
+        SetupSection(title = "Your Name") {
+            OutlinedTextField(
+                value = nameInput,
+                onValueChange = { nameInput = it; onUpdateMyName(it) },
+                label = { Text("Display name") },
+                placeholder = { Text("e.g. Dad, Mom, Daughter…") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                leadingIcon = {
+                    Icon(Icons.Default.Person, contentDescription = null)
                 }
+            )
+        }
 
-                Spacer(modifier = Modifier.height(12.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    HorizontalDivider(modifier = Modifier.weight(1f))
-                    Text(" OR ", fontSize = 12.sp, color = Color.Gray, modifier = Modifier.padding(horizontal = 8.dp))
-                    HorizontalDivider(modifier = Modifier.weight(1f))
-                }
-                Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(20.dp))
 
-                OutlinedTextField(
-                    value = pairingCodeInput,
-                    onValueChange = { pairingCodeInput = it },
-                    label = { Text("Paste Family Pairing Code") },
-                    trailingIcon = {
-                        IconButton(onClick = {
-                            val clip = onPasteFromClipboard()
-                            if (!clip.isNullOrBlank()) {
-                                pairingCodeInput = clip.trim()
-                                Toast.makeText(context, "Pasted from clipboard!", Toast.LENGTH_SHORT).show()
-                            } else {
-                                Toast.makeText(context, "Clipboard is empty.", Toast.LENGTH_SHORT).show()
-                            }
-                        }) {
-                            Icon(Icons.Default.ContentPaste, contentDescription = "Paste from clipboard")
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth()
+        // ── Pair a device ─────────────────────────────────────────────────────
+        SetupSection(title = "Pair a Device") {
+            Button(
+                onClick = onScanQrCode,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(50),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+            ) {
+                Icon(Icons.Default.QrCodeScanner, contentDescription = null)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Scan QR Code", fontWeight = FontWeight.SemiBold)
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                HorizontalDivider(modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.outlineVariant)
+                Text(
+                    " or ",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 8.dp)
                 )
-                Spacer(modifier = Modifier.height(8.dp))
-                OutlinedButton(
-                    onClick = {
-                        val trimmed = pairingCodeInput.trim()
-                        if (trimmed.isBlank()) {
-                            Toast.makeText(context, "Please paste or enter a pairing code first!", Toast.LENGTH_LONG).show()
-                        } else if (onImportPairingCode(trimmed)) {
-                            pairingCodeInput = ""
-                            Toast.makeText(context, "Device successfully paired!", Toast.LENGTH_SHORT).show()
+                HorizontalDivider(modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.outlineVariant)
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            OutlinedTextField(
+                value = pairingCodeInput,
+                onValueChange = { pairingCodeInput = it },
+                label = { Text("Paste pairing code") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                trailingIcon = {
+                    IconButton(onClick = {
+                        val clip = onPasteFromClipboard()
+                        if (!clip.isNullOrBlank()) {
+                            pairingCodeInput = clip.trim()
+                            Toast.makeText(context, "Pasted!", Toast.LENGTH_SHORT).show()
                         } else {
-                            Toast.makeText(context, "Invalid pairing code. Make sure to copy the full code from the other device.", Toast.LENGTH_LONG).show()
+                            Toast.makeText(context, "Clipboard is empty.", Toast.LENGTH_SHORT).show()
                         }
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Icon(Icons.Default.PersonAdd, contentDescription = null)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Add & Pair via Text Code")
+                    }) {
+                        Icon(Icons.Default.ContentPaste, contentDescription = "Paste")
+                    }
                 }
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            FilledTonalButton(
+                onClick = {
+                    val trimmed = pairingCodeInput.trim()
+                    when {
+                        trimmed.isBlank() -> Toast.makeText(context, "Enter a pairing code first.", Toast.LENGTH_LONG).show()
+                        onImportPairingCode(trimmed) -> {
+                            pairingCodeInput = ""
+                            Toast.makeText(context, "Device paired!", Toast.LENGTH_SHORT).show()
+                        }
+                        else -> Toast.makeText(context, "Invalid code — copy the full code from the other device.", Toast.LENGTH_LONG).show()
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(50)
+            ) {
+                Icon(Icons.Default.PersonAdd, contentDescription = null)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Add via Text Code")
             }
         }
 
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(20.dp))
 
-        Text("Your Device Pairing QR Code 📲", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-        Text("Hold this screen up so another phone can scan it with their camera.", fontSize = 12.sp, color = Color.Gray)
-        Spacer(modifier = Modifier.height(8.dp))
+        // ── QR code ───────────────────────────────────────────────────────────
+        SetupSection(title = "Your Pairing QR Code") {
+            Text(
+                "Show this to another phone to pair with you.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(16.dp))
 
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = Color.White)
-        ) {
+            val qrBitmap = remember(uiState.myPairingCode) {
+                if (uiState.myPairingCode.isNotBlank())
+                    QrCodeGenerator.generateQrBitmap(uiState.myPairingCode, 512)?.asImageBitmap()
+                else null
+            }
+
             Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp),
+                modifier = Modifier.fillMaxWidth(),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                val qrBitmap = remember(uiState.myPairingCode) {
-                    if (uiState.myPairingCode.isNotBlank()) {
-                        QrCodeGenerator.generateQrBitmap(uiState.myPairingCode, 512)?.asImageBitmap()
-                    } else null
-                }
-
                 qrBitmap?.let { bitmap ->
-                    Image(
-                        bitmap = bitmap,
-                        contentDescription = "My Pairing QR Code",
+                    Box(
                         modifier = Modifier
                             .size(200.dp)
-                            .background(Color.White, RoundedCornerShape(8.dp))
-                    )
-                } ?: Text("Generating QR Code...", fontSize = 12.sp, color = Color.Gray)
+                            .background(Color.White, RoundedCornerShape(16.dp))
+                            .padding(12.dp)
+                    ) {
+                        Image(
+                            bitmap = bitmap,
+                            contentDescription = "My Pairing QR Code",
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
+                } ?: Text(
+                    "Generating…",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
 
-                Spacer(modifier = Modifier.height(12.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.Center
-                ) {
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedButton(
-                        onClick = { onShareText("Paging Dr. Howard Pairing Code", uiState.myPairingCode) }
+                        onClick = { onShareText("Paging Dr. Howard Pairing Code", uiState.myPairingCode) },
+                        shape = RoundedCornerShape(50)
                     ) {
                         Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Share Code")
+                        Text("Share")
                     }
-                    Spacer(modifier = Modifier.width(8.dp))
                     Button(
-                        onClick = { onCopyText("Pairing Code", uiState.myPairingCode) }
+                        onClick = { onCopyText("Pairing Code", uiState.myPairingCode) },
+                        shape = RoundedCornerShape(50)
                     ) {
                         Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Copy Code")
+                        Text("Copy")
                     }
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(20.dp))
 
-        // Notification Sound Settings Card
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFFF3E5F5))
-        ) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("🧚 Navi \"Hey Look!\" Sound", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color(0xFF6A1B9A))
-                        Text(
-                            "Play Navi's iconic voice clip when receiving a 'Hey Look!' page. If off, plays system notification sound.",
-                            fontSize = 12.sp,
-                            color = Color.DarkGray
-                        )
-                    }
-                    Switch(
-                        checked = uiState.isNaviSoundEnabled,
-                        onCheckedChange = onToggleNaviSound,
-                        colors = SwitchDefaults.colors(checkedThumbColor = Color(0xFF6A1B9A), checkedTrackColor = Color(0xFFCE93D8))
+        // ── Navi sound ────────────────────────────────────────────────────────
+        SetupSection(title = "Notification Sound") {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        "🧚 Navi \"Hey Look!\" sound",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        "Play Navi's voice clip on Hey Look pages. Off = system sound.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-
-                Spacer(modifier = Modifier.height(12.dp))
-                HorizontalDivider(color = Color(0xFFE1BEE7))
-                Spacer(modifier = Modifier.height(12.dp))
-
-                Text("Sound Tests", fontWeight = FontWeight.SemiBold, fontSize = 14.sp, color = Color(0xFF4A148C))
-                Spacer(modifier = Modifier.height(8.dp))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    OutlinedButton(
-                        onClick = onTestHeyLook,
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Icon(Icons.Default.Visibility, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Test Hey Look!", fontSize = 12.sp)
-                    }
-
-                    OutlinedButton(
-                        onClick = onTestAlarm,
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Icon(Icons.Default.NotificationsActive, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Test SOS Alarm", fontSize = 12.sp)
-                    }
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(24.dp))
-
-        Spacer(modifier = Modifier.height(24.dp))
-
-        Text("Push Relay Server (Anti-DDoS / Multi-Host)", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-        Text("Primary relay server for push delivery with automatic polite failover.", fontSize = 12.sp, color = Color.Gray)
-        Spacer(modifier = Modifier.height(8.dp))
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFFF5F5F5))
-        ) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                OutlinedTextField(
-                    value = serverInput,
-                    onValueChange = {
-                        serverInput = it
-                        onUpdateRelayServerUrl(it)
-                    },
-                    label = { Text("Relay Server URL") },
-                    placeholder = { Text("https://ntfy.sh/") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
+                Switch(
+                    checked = uiState.isNaviSoundEnabled,
+                    onCheckedChange = onToggleNaviSound
                 )
-                Spacer(modifier = Modifier.height(8.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedButton(
+                    onClick = onTestHeyLook,
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(50)
                 ) {
-                    OutlinedButton(
-                        onClick = {
-                            serverInput = "https://ntfy.tedomum.fr/"
-                            onUpdateRelayServerUrl("https://ntfy.tedomum.fr/")
-                        },
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text("Default (tedomum)", fontSize = 11.sp)
-                    }
-                    OutlinedButton(
-                        onClick = {
-                            serverInput = "https://ntfy.adminforge.de/"
-                            onUpdateRelayServerUrl("https://ntfy.adminforge.de/")
-                        },
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text("Mirror (adminforge)", fontSize = 11.sp)
-                    }
+                    Icon(Icons.Default.Visibility, contentDescription = null, modifier = Modifier.size(14.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Test Hey Look!", style = MaterialTheme.typography.labelMedium)
+                }
+                OutlinedButton(
+                    onClick = onTestAlarm,
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(50),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = SosRed),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, SosRed)
+                ) {
+                    Icon(Icons.Default.NotificationsActive, contentDescription = null, modifier = Modifier.size(14.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Test SOS", style = MaterialTheme.typography.labelMedium)
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(20.dp))
 
-        Text("About & Version", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-        Spacer(modifier = Modifier.height(8.dp))
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFFECEFF1))
-        ) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("App Version", fontWeight = FontWeight.Medium, fontSize = 14.sp)
-                    Surface(
-                        color = Color(0xFF37474F),
-                        shape = RoundedCornerShape(6.dp)
+        // ── Relay server ──────────────────────────────────────────────────────
+        SetupSection(title = "Relay Server") {
+            OutlinedTextField(
+                value = serverInput,
+                onValueChange = { serverInput = it; onUpdateRelayServerUrl(it) },
+                label = { Text("Server URL") },
+                placeholder = { Text("https://ntfy.sh/") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                leadingIcon = { Icon(Icons.Default.Cloud, contentDescription = null) }
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                FilledTonalButton(
+                    onClick = {
+                        serverInput = "https://ntfy.tedomum.fr/"
+                        onUpdateRelayServerUrl("https://ntfy.tedomum.fr/")
+                    },
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(50)
+                ) { Text("tedomum", style = MaterialTheme.typography.labelMedium) }
+
+                FilledTonalButton(
+                    onClick = {
+                        serverInput = "https://ntfy.adminforge.de/"
+                        onUpdateRelayServerUrl("https://ntfy.adminforge.de/")
+                    },
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(50)
+                ) { Text("adminforge", style = MaterialTheme.typography.labelMedium) }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(20.dp))
+
+        // ── About ─────────────────────────────────────────────────────────────
+        SetupSection(title = "About") {
+            InfoRow("Version", uiState.appVersion)
+            HorizontalDivider(
+                modifier = Modifier.padding(vertical = 8.dp),
+                color = MaterialTheme.colorScheme.outlineVariant
+            )
+            InfoRow(
+                label = "Device ID",
+                value = uiState.myTopicId.take(16) + "…",
+                trailingAction = {
+                    IconButton(
+                        onClick = { onCopyText("Device Topic ID", uiState.myTopicId) },
+                        modifier = Modifier.size(28.dp)
                     ) {
-                        Text(
-                            text = uiState.appVersion,
-                            color = Color.White,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 13.sp,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        Icon(
+                            Icons.Default.ContentCopy,
+                            contentDescription = "Copy",
+                            modifier = Modifier.size(14.dp),
+                            tint = MaterialTheme.colorScheme.primary
                         )
                     }
                 }
-                Spacer(modifier = Modifier.height(8.dp))
-                Divider(color = Color.LightGray)
-                Spacer(modifier = Modifier.height(8.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("Device Topic ID", fontSize = 12.sp, color = Color.Gray)
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(uiState.myTopicId.take(16) + "...", fontSize = 12.sp, color = Color.DarkGray)
-                        Spacer(modifier = Modifier.width(4.dp))
-                        IconButton(
-                            onClick = { onCopyText("Device Topic ID", uiState.myTopicId) },
-                            modifier = Modifier.size(24.dp)
-                        ) {
-                            Icon(Icons.Default.ContentCopy, contentDescription = "Copy Topic ID", modifier = Modifier.size(14.dp), tint = Color(0xFFD32F2F))
-                        }
-                    }
-                }
-                Spacer(modifier = Modifier.height(4.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text("Active Relay Server", fontSize = 12.sp, color = Color.Gray)
-                    Text(uiState.relayServerUrl, fontSize = 12.sp, color = Color.DarkGray)
-                }
-                Spacer(modifier = Modifier.height(4.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text("Protocol", fontSize = 12.sp, color = Color.Gray)
-                    Text("ntfy SSE + ECDSA P-256", fontSize = 12.sp, color = Color.DarkGray)
-                }
-                Spacer(modifier = Modifier.height(12.dp))
-                val context = androidx.compose.ui.platform.LocalContext.current
-                val monitorUrl = "${uiState.relayServerUrl.trimEnd('/')}/${uiState.myTopicId}"
-                OutlinedButton(
-                    onClick = {
-                        val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse(monitorUrl))
-                        context.startActivity(browserIntent)
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Icon(Icons.Default.OpenInBrowser, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Open Live Push Web Monitor", fontSize = 12.sp)
-                }
+            )
+            HorizontalDivider(
+                modifier = Modifier.padding(vertical = 8.dp),
+                color = MaterialTheme.colorScheme.outlineVariant
+            )
+            InfoRow("Protocol", "ntfy SSE + ECDSA P-256")
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            val monitorUrl = "${uiState.relayServerUrl.trimEnd('/')}/${uiState.myTopicId}"
+            val ctx = LocalContext.current
+            OutlinedButton(
+                onClick = {
+                    ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(monitorUrl)))
+                },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(50)
+            ) {
+                Icon(Icons.Default.OpenInBrowser, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Open Push Web Monitor", style = MaterialTheme.typography.labelMedium)
             }
         }
-        Spacer(modifier = Modifier.height(16.dp))
+
+        Spacer(modifier = Modifier.height(32.dp))
+    }
+}
+
+// ─── Reusable components ──────────────────────────────────────────────────────
+
+@Composable
+fun SetupSection(
+    title: String,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    Text(
+        title,
+        style = MaterialTheme.typography.titleSmall,
+        fontWeight = FontWeight.SemiBold,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(bottom = 10.dp)
+    )
+    ElevatedCard(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.elevatedCardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+        ),
+        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 1.dp)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            content()
+        }
+    }
+}
+
+@Composable
+fun InfoRow(
+    label: String,
+    value: String,
+    trailingAction: @Composable (() -> Unit)? = null
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            label,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                value,
+                style = MaterialTheme.typography.bodySmall,
+                fontWeight = FontWeight.Medium,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            trailingAction?.invoke()
+        }
     }
 }

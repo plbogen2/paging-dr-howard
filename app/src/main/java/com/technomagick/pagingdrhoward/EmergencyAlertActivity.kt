@@ -10,7 +10,9 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.*
@@ -64,12 +66,14 @@ class EmergencyAlertActivity : ComponentActivity() {
         val pageLevel = PageLevel.fromCode(levelCode)
 
         setContent {
-            EmergencyAlertScreen(
-                pageLevel = pageLevel,
-                senderName = senderName,
-                messageText = messageText,
-                onDismiss = { dismissPage(senderTopic, timestamp, messageKey) }
-            )
+            PagingDrHowardTheme {
+                EmergencyAlertScreen(
+                    pageLevel = pageLevel,
+                    senderName = senderName,
+                    messageText = messageText,
+                    onDismiss = { dismissPage(senderTopic, timestamp, messageKey) }
+                )
+            }
         }
     }
 
@@ -175,6 +179,7 @@ class EmergencyAlertActivity : ComponentActivity() {
 @Composable
 fun EmergencyAlertScreen(pageLevel: PageLevel, senderName: String, messageText: String, onDismiss: () -> Unit) {
     val backgroundColor = Color(pageLevel.colorHex)
+    val isHeyLook = pageLevel == PageLevel.HEY_LOOK
 
     Surface(
         modifier = Modifier.fillMaxSize(),
@@ -183,51 +188,88 @@ fun EmergencyAlertScreen(pageLevel: PageLevel, senderName: String, messageText: 
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(24.dp),
+                .systemBarsPadding()
+                .padding(horizontal = 28.dp, vertical = 32.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.SpaceBetween
         ) {
-            Spacer(modifier = Modifier.height(32.dp))
-
+            // ── Top: icon + level title ──────────────────────────────────────
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                // Outer glow ring + icon circle
                 Box(
                     modifier = Modifier
-                        .size(100.dp)
-                        .background(Color.White.copy(alpha = 0.2f), shape = CircleShape),
+                        .size(120.dp)
+                        .background(Color.White.copy(alpha = 0.15f), CircleShape),
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(
-                        imageVector = if (pageLevel == PageLevel.HEY_LOOK) Icons.Default.Visibility else Icons.Default.NotificationsActive,
-                        contentDescription = "Alert Level",
-                        tint = Color.White,
-                        modifier = Modifier.size(64.dp)
-                    )
+                    Box(
+                        modifier = Modifier
+                            .size(96.dp)
+                            .background(Color.White.copy(alpha = 0.25f), CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = if (isHeyLook) Icons.Default.Visibility
+                                          else Icons.Default.NotificationsActive,
+                            contentDescription = "Alert level",
+                            tint = Color.White,
+                            modifier = Modifier.size(52.dp)
+                        )
+                    }
                 }
 
-                Spacer(modifier = Modifier.height(24.dp))
+                Spacer(modifier = Modifier.height(28.dp))
 
                 Text(
-                    text = pageLevel.title.uppercase(),
-                    fontSize = 28.sp,
-                    fontWeight = FontWeight.Bold,
+                    text = if (isHeyLook) "HEY LOOK! 👀" else "SOS EMERGENCY 🚨",
+                    fontSize = 30.sp,
+                    fontWeight = FontWeight.ExtraBold,
                     color = Color.White,
-                    letterSpacing = 2.sp,
+                    letterSpacing = 1.sp,
                     textAlign = TextAlign.Center
                 )
 
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(8.dp))
 
-                Text(
-                    text = "From: $senderName",
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = Color.White.copy(alpha = 0.9f)
-                )
+                // Sender pill
+                Surface(
+                    shape = RoundedCornerShape(50),
+                    color = Color.White.copy(alpha = 0.2f)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // Sender avatar
+                        Box(
+                            modifier = Modifier
+                                .size(28.dp)
+                                .background(Color.White.copy(alpha = 0.4f), CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                senderName.take(1).uppercase(),
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            "From $senderName",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color.White
+                        )
+                    }
+                }
 
-                Spacer(modifier = Modifier.height(24.dp))
+                Spacer(modifier = Modifier.height(28.dp))
 
+                // Message card
                 Card(
-                    colors = CardDefaults.cardColors(containerColor = Color.White),
+                    colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = 0.95f)),
+                    shape = RoundedCornerShape(20.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(
@@ -235,22 +277,31 @@ fun EmergencyAlertScreen(pageLevel: PageLevel, senderName: String, messageText: 
                         fontSize = 18.sp,
                         fontWeight = FontWeight.Normal,
                         color = Color.Black,
-                        modifier = Modifier.padding(20.dp),
+                        modifier = Modifier.padding(24.dp),
                         textAlign = TextAlign.Center
                     )
                 }
             }
 
+            // ── Bottom: dismiss button ───────────────────────────────────────
             Button(
                 onClick = onDismiss,
                 colors = ButtonDefaults.buttonColors(containerColor = Color.White),
+                shape = RoundedCornerShape(50),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(64.dp)
+                    .height(60.dp)
             ) {
+                Icon(
+                    Icons.Default.CheckCircle,
+                    contentDescription = null,
+                    tint = backgroundColor,
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(modifier = Modifier.width(10.dp))
                 Text(
-                    text = "ACKNOWLEDGE & DISMISS 🔕",
-                    fontSize = 18.sp,
+                    "Acknowledge & Dismiss",
+                    fontSize = 17.sp,
                     fontWeight = FontWeight.Bold,
                     color = backgroundColor
                 )
