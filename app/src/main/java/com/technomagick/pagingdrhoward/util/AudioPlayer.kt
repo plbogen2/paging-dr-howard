@@ -11,10 +11,14 @@ import android.os.Looper
 import android.util.Log
 import com.technomagick.pagingdrhoward.data.PageLevel
 
+import android.media.AudioFocusRequest
+import android.os.Build
+
 object AudioPlayer {
     private const val TAG = "AudioPlayer"
     private var mediaPlayer: MediaPlayer? = null
     private var originalVolume: Int = -1
+    private var audioFocusRequest: AudioFocusRequest? = null
     private val autoStopHandler = Handler(Looper.getMainLooper())
     private var autoStopRunnable: Runnable? = null
     private const val MAX_ALARM_DURATION_MS = 60_000L // Safety timeout: auto-stop after 60 seconds
@@ -27,6 +31,28 @@ object AudioPlayer {
 
         try {
             val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+
+            // Request transient audio focus so Android Auto / car stereo pauses music playback
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    val focusRequest = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
+                        .setAudioAttributes(
+                            AudioAttributes.Builder()
+                                .setUsage(AudioAttributes.USAGE_ALARM)
+                                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                                .build()
+                        )
+                        .setOnAudioFocusChangeListener { /* no-op */ }
+                        .build()
+                    audioFocusRequest = focusRequest
+                    audioManager.requestAudioFocus(focusRequest)
+                } else {
+                    @Suppress("DEPRECATION")
+                    audioManager.requestAudioFocus(null, AudioManager.STREAM_ALARM, AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to acquire audio focus", e)
+            }
 
             // Save original alarm volume and set STREAM_ALARM to max for SOS, or high for HEY_LOOK
             originalVolume = audioManager.getStreamVolume(AudioManager.STREAM_ALARM)
@@ -108,8 +134,23 @@ object AudioPlayer {
             }
             mediaPlayer = null
 
+            val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    audioFocusRequest?.let {
+                        audioManager.abandonAudioFocusRequest(it)
+                        audioFocusRequest = null
+                    }
+                } else {
+                    @Suppress("DEPRECATION")
+                    audioManager.abandonAudioFocus(null)
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to abandon audio focus", e)
+            }
+
             if (originalVolume != -1) {
-                val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
                 audioManager.setStreamVolume(AudioManager.STREAM_ALARM, originalVolume, 0)
                 originalVolume = -1
             }

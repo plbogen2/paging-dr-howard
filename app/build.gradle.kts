@@ -14,7 +14,7 @@ android {
         minSdk = 26
         targetSdk = 34
         versionCode = buildNumber
-        versionName = "1.0.2.$buildNumber"
+        versionName = "1.1.0.$buildNumber"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -86,6 +86,9 @@ dependencies {
     // QR Code Generation & Scanning (Zero Play Services dependency)
     implementation("com.google.zxing:core:3.5.3")
     implementation("com.journeyapps:zxing-android-embedded:4.3.0")
+
+    // Android Auto (Android for Cars App Library)
+    implementation("androidx.car.app:app:1.4.0")
 
     // Unit Testing
     testImplementation("junit:junit:4.13.2")

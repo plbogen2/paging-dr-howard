@@ -87,6 +87,29 @@
                 android:resource="@xml/file_paths" />
         </provider>
 
+        <!-- Android Auto Integration -->
+        <meta-data
+            android:name="androidx.car.app.minCarApiLevel"
+            android:value="1" />
+
+        <service
+            android:name=".car.PagerCarAppService"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="androidx.car.app.CarAppService" />
+                <category android:name="androidx.car.app.category.IOT" />
+            </intent-filter>
+        </service>
+
+        <!-- Notification & Android Auto Dismiss Receiver -->
+        <receiver
+            android:name=".receiver.AlertActionReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.technomagick.pagingdrhoward.ACTION_DISMISS_ALERT" />
+            </intent-filter>
+        </receiver>
+
     </application>
 
 </manifest>

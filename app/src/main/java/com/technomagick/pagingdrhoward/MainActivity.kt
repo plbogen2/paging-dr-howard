@@ -210,42 +210,10 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun sendRemotePage(contact: PairedContact, level: PageLevel, customMessage: String? = null) {
-        val prefs = getSharedPreferences(DefaultPagerRepository.PREF_NAME, Context.MODE_PRIVATE)
-        val repository = DefaultPagerRepository(prefs)
-
-        val senderName = repository.getMyName()
-        val myTopicId = repository.getMyTopicId()
-        val myPublicKeyBase64 = repository.getMyPublicKeyBase64()
-        val myPrivateKey = repository.getMyPrivateKey()
-        val serverUrl = repository.getRelayServerUrl()
-
-        val peerPublicKey = if (contact.publicKeyBase64.isNotBlank()) {
-            try { CryptoManager.publicKeyFromBase64(contact.publicKeyBase64) } catch (e: Exception) { null }
-        } else null
-
-        val message = customMessage?.trim()?.takeIf { it.isNotBlank() }
-            ?: if (level == PageLevel.SOS) "URGENT: Please respond immediately!" else "Hey look! 👀"
-
         viewModel.startCooldown(contact.topicId)
-
-        Thread {
-            try {
-                PushSender.sendAlert(
-                    targetTopicId = contact.topicId,
-                    senderName = senderName,
-                    myTopicId = myTopicId,
-                    myPublicKeyBase64 = myPublicKeyBase64,
-                    myPrivateKey = myPrivateKey,
-                    peerPublicKey = peerPublicKey,
-                    level = level,
-                    message = message,
-                    serverUrl = serverUrl
-                )
-                LogHelper.i("MainActivity", "Page sent to ${contact.name} (${level.code})")
-            } catch (e: Exception) {
-                LogHelper.e("MainActivity", "Failed to send page to ${contact.name}", e)
-            }
-        }.start()
+        com.technomagick.pagingdrhoward.car.PageSenderHelper.sendRemotePage(this, contact, level, customMessage) { success, msg ->
+            LogHelper.i("MainActivity", "Page sent to ${contact.name} (${level.code}): success=$success msg=$msg")
+        }
     }
 
     private fun copyToClipboard(label: String, text: String) {

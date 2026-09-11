@@ -22,6 +22,19 @@ class EmergencyPagerService : Service() {
         private var currentActiveMessageKey: String? = null
         @Volatile
         private var lastAlarmTriggerTimeMs: Long = 0L
+
+        @Volatile
+        var isAlarmActive: Boolean = false
+            private set
+        @Volatile
+        var activeSender: String = ""
+            private set
+        @Volatile
+        var activeTopic: String = ""
+            private set
+        @Volatile
+        var activeTimestamp: Long = 0L
+            private set
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -30,6 +43,10 @@ class EmergencyPagerService : Service() {
         val action = intent?.action
 
         if (action == ACTION_STOP_ALARM) {
+            isAlarmActive = false
+            activeSender = ""
+            activeTopic = ""
+            activeTimestamp = 0L
             currentActiveMessageKey = null
             lastAlarmTriggerTimeMs = 0L
             AudioPlayer.stopEmergencyAlarm(this)
@@ -68,6 +85,28 @@ class EmergencyPagerService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
+        val dismissIntent = Intent(this, com.technomagick.pagingdrhoward.receiver.AlertActionReceiver::class.java).apply {
+            action = com.technomagick.pagingdrhoward.receiver.AlertActionReceiver.ACTION_DISMISS_ALERT
+            putExtra("EXTRA_SENDER_TOPIC", senderTopic)
+            putExtra("EXTRA_TIMESTAMP", timestamp)
+            putExtra("EXTRA_MESSAGE_KEY", messageKey)
+        }
+        val dismissPendingIntent = PendingIntent.getBroadcast(
+            this,
+            101,
+            dismissIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val dismissAction = NotificationCompat.Action.Builder(
+            android.R.drawable.ic_menu_close_clear_cancel,
+            "Acknowledge & Dismiss",
+            dismissPendingIntent
+        ).build()
+
+        val carExtender = NotificationCompat.CarExtender()
+            .setColor(if (pageLevel == PageLevel.SOS) 0xFFD32F2F.toInt() else 0xFFF57C00.toInt())
+
         val notification = NotificationCompat.Builder(this, DndHelper.CHANNEL_EMERGENCY_ID)
             .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
             .setContentTitle("${pageLevel.title} from $sender")
@@ -75,6 +114,8 @@ class EmergencyPagerService : Service() {
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setCategory(NotificationCompat.CATEGORY_ALARM)
             .setFullScreenIntent(fullScreenPendingIntent, true)
+            .addAction(dismissAction)
+            .extend(carExtender)
             .setOngoing(true)
             .setAutoCancel(false)
             .build()
@@ -90,10 +131,23 @@ class EmergencyPagerService : Service() {
             startForeground(NOTIFICATION_ID, notification)
         }
 
+        isAlarmActive = true
+        activeSender = sender
+        activeTopic = senderTopic
+        activeTimestamp = timestamp
+
         AudioPlayer.startEmergencyAlarm(this, pageLevel)
         fullScreenIntent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
         startActivity(fullScreenIntent)
 
         return START_STICKY
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        isAlarmActive = false
+        activeSender = ""
+        activeTopic = ""
+        activeTimestamp = 0L
     }
 }

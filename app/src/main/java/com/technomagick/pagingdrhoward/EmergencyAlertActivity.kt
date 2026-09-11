@@ -78,50 +78,7 @@ class EmergencyAlertActivity : ComponentActivity() {
     }
 
     private fun dismissPage(senderTopic: String, alertTimestamp: Long, messageKey: String = "") {
-        // Immediately silence audio and stop emergency pager service
-        com.technomagick.pagingdrhoward.util.AudioPlayer.stopEmergencyAlarm(this)
-        val stopServiceIntent = Intent(this, EmergencyPagerService::class.java).apply {
-            action = EmergencyPagerService.ACTION_STOP_ALARM
-        }
-        startService(stopServiceIntent)
-
-        val prefs = getSharedPreferences(com.technomagick.pagingdrhoward.data.DefaultPagerRepository.PREF_NAME, MODE_PRIVATE)
-        val repository = com.technomagick.pagingdrhoward.data.DefaultPagerRepository(prefs)
-
-        // Persist dismissed timestamp and message key so replayed SSE events for this page or earlier are permanently ignored
-        val effectiveDismissTimestamp = maxOf(alertTimestamp, System.currentTimeMillis())
-        repository.saveLastDismissedAlertTimestamp(effectiveDismissTimestamp)
-        if (messageKey.isNotBlank()) {
-            repository.markMessageDismissed(messageKey)
-        }
-
-        // Purge the emergency alert message from Firebase RTDB now that user acknowledged/dismissed
-        if (messageKey.isNotBlank()) {
-            com.technomagick.pagingdrhoward.network.PushSender.deleteMessage(
-                serverUrl = repository.getRelayServerUrl(),
-                topicId = repository.getMyTopicId(),
-                messageKey = messageKey
-            )
-        }
-
-        // Send acknowledgment receipt back to sender's topic
-        if (senderTopic.isNotBlank()) {
-            val contact = repository.getPairedContacts().find { it.topicId == senderTopic }
-            val peerPublicKey = if (contact != null && contact.publicKeyBase64.isNotBlank()) {
-                try { com.technomagick.pagingdrhoward.util.CryptoManager.publicKeyFromBase64(contact.publicKeyBase64) } catch (e: Exception) { null }
-            } else null
-
-            com.technomagick.pagingdrhoward.network.PushSender.sendAlertAck(
-                targetTopicId = senderTopic,
-                acknowledgerName = repository.getMyName(),
-                myTopicId = repository.getMyTopicId(),
-                myPublicKeyBase64 = repository.getMyPublicKeyBase64(),
-                myPrivateKey = repository.getMyPrivateKey(),
-                peerPublicKey = peerPublicKey,
-                serverUrl = repository.getRelayServerUrl()
-            )
-        }
-
+        com.technomagick.pagingdrhoward.receiver.AlertActionReceiver.performDismiss(this, senderTopic, alertTimestamp, messageKey)
         finish()
     }
 
