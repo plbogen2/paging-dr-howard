@@ -996,35 +996,12 @@ fun RecipientSetupScreen(
                 value = serverInput,
                 onValueChange = { serverInput = it; onUpdateRelayServerUrl(it) },
                 label = { Text("Server URL") },
-                placeholder = { Text("https://ntfy.sh/") },
+                placeholder = { Text("https://your-relay-server.com/") },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(12.dp),
                 leadingIcon = { Icon(Icons.Default.Cloud, contentDescription = null) }
             )
-            Spacer(modifier = Modifier.height(8.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                FilledTonalButton(
-                    onClick = {
-                        serverInput = "https://ntfy.tedomum.fr/"
-                        onUpdateRelayServerUrl("https://ntfy.tedomum.fr/")
-                    },
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(50)
-                ) { Text("tedomum", style = MaterialTheme.typography.labelMedium) }
-
-                FilledTonalButton(
-                    onClick = {
-                        serverInput = "https://ntfy.adminforge.de/"
-                        onUpdateRelayServerUrl("https://ntfy.adminforge.de/")
-                    },
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(50)
-                ) { Text("adminforge", style = MaterialTheme.typography.labelMedium) }
-            }
         }
 
         Spacer(modifier = Modifier.height(20.dp))
@@ -1057,7 +1034,7 @@ fun RecipientSetupScreen(
                 modifier = Modifier.padding(vertical = 8.dp),
                 color = MaterialTheme.colorScheme.outlineVariant
             )
-            InfoRow("Protocol", "ntfy SSE + ECDSA P-256")
+            InfoRow("Protocol", "SSE + ECDSA P-256")
 
             Spacer(modifier = Modifier.height(12.dp))
 

@@ -13,19 +13,12 @@ import java.security.PublicKey
 
 object PushSender {
     private const val TAG = "PushSender"
-    const val DEFAULT_NTFY_BASE_URL = "https://paging-dr-howard-default-rtdb.firebaseio.com/"
-    const val NTFY_BASE_URL = "https://paging-dr-howard-default-rtdb.firebaseio.com/"
+    const val DEFAULT_RELAY_BASE_URL = "https://paging-dr-howard-default-rtdb.firebaseio.com/"
     const val USER_AGENT = "PagingDrHoward/1.0 (Android Emergency Pager; +https://github.com/plbogen2/paging-dr-howard)"
-
-    val FALLBACK_SERVERS = listOf(
-        "https://ntfy.tedomum.fr/",
-        "https://ntfy.adminforge.de/",
-        "https://ntfy.sh/"
-    )
 
     fun getDispatchUrl(base: String, topic: String): String {
         val cleanTopic = topic.trim().replace(Regex("^https?:/+[^/]+/"), "").replace(Regex("[^a-zA-Z0-9_-]"), "_")
-        val cleanBase = if (base.isNotBlank()) (if (base.endsWith("/")) base else "$base/") else DEFAULT_NTFY_BASE_URL
+        val cleanBase = if (base.isNotBlank()) (if (base.endsWith("/")) base else "$base/") else DEFAULT_RELAY_BASE_URL
         return if (cleanBase.contains("firebaseio.com")) {
             "${cleanBase}channels/$cleanTopic.json"
         } else {
@@ -51,7 +44,7 @@ object PushSender {
     )
 
     /**
-     * Builds and signs a JSON payload for transmission over ntfy.sh public push relay.
+     * Builds and signs an encrypted JSON payload for transmission over the configured relay server.
      */
     fun buildPayloadJson(
         message: PageMessage,
@@ -92,7 +85,7 @@ object PushSender {
     }
 
     /**
-     * Sends an encrypted, high-priority emergency page to target contact's private topic on ntfy.
+     * Sends an encrypted, high-priority emergency page to the target contact via the configured relay server.
      * Tries preferred serverUrl first; if network fails/times out, fails over to alternate public relays.
      */
     fun sendPage(
@@ -104,7 +97,7 @@ object PushSender {
         recipientPublicKey: PublicKey?,
         pageLevel: PageLevel = PageLevel.SOS,
         messageText: String = "",
-        serverUrl: String = DEFAULT_NTFY_BASE_URL,
+        serverUrl: String = DEFAULT_RELAY_BASE_URL,
         onResult: (Boolean, String) -> Unit
     ) {
         val topic = targetTopicId.trim().substringAfterLast("/")
@@ -125,7 +118,7 @@ object PushSender {
         val jsonPayload = buildPayloadJson(msg, senderPrivateKey, recipientPublicKey)
         val cleanTitle = "${pageLevel.name.replace('_', ' ')} from $senderName".filter { it.code in 32..126 }
 
-        val targetBase = if (serverUrl.isNotBlank()) (if (serverUrl.endsWith("/")) serverUrl else "$serverUrl/") else DEFAULT_NTFY_BASE_URL
+        val targetBase = if (serverUrl.isNotBlank()) (if (serverUrl.endsWith("/")) serverUrl else "$serverUrl/") else DEFAULT_RELAY_BASE_URL
         val url = getDispatchUrl(targetBase, topic)
         val request = Request.Builder()
             .url(url)
@@ -164,7 +157,7 @@ object PushSender {
         myPrivateKey: PrivateKey?,
         peerPublicKey: PublicKey?,
         isReply: Boolean = false,
-        serverUrl: String = DEFAULT_NTFY_BASE_URL,
+        serverUrl: String = DEFAULT_RELAY_BASE_URL,
         onResult: (Boolean) -> Unit = {}
     ) {
         val topic = targetTopicId.trim().substringAfterLast("/")
@@ -182,7 +175,7 @@ object PushSender {
         val jsonPayload = buildPayloadJson(msg, myPrivateKey, peerPublicKey)
         val cleanSender = myName.filter { it.code in 32..126 }
 
-        val targetBase = if (serverUrl.isNotBlank()) (if (serverUrl.endsWith("/")) serverUrl else "$serverUrl/") else DEFAULT_NTFY_BASE_URL
+        val targetBase = if (serverUrl.isNotBlank()) (if (serverUrl.endsWith("/")) serverUrl else "$serverUrl/") else DEFAULT_RELAY_BASE_URL
         val url = getDispatchUrl(targetBase, topic)
         val request = Request.Builder()
             .url(url)
@@ -214,7 +207,7 @@ object PushSender {
         myPublicKeyBase64: String,
         myPrivateKey: PrivateKey?,
         peerPublicKey: PublicKey?,
-        serverUrl: String = DEFAULT_NTFY_BASE_URL,
+        serverUrl: String = DEFAULT_RELAY_BASE_URL,
         onResult: (Boolean) -> Unit = {}
     ) {
         val topic = targetTopicId.trim().substringAfterLast("/")
@@ -232,7 +225,7 @@ object PushSender {
         val jsonPayload = buildPayloadJson(msg, myPrivateKey, peerPublicKey)
         val cleanSender = newName.filter { it.code in 32..126 }
 
-        val targetBase = if (serverUrl.isNotBlank()) (if (serverUrl.endsWith("/")) serverUrl else "$serverUrl/") else DEFAULT_NTFY_BASE_URL
+        val targetBase = if (serverUrl.isNotBlank()) (if (serverUrl.endsWith("/")) serverUrl else "$serverUrl/") else DEFAULT_RELAY_BASE_URL
         val url = getDispatchUrl(targetBase, topic)
         val request = Request.Builder()
             .url(url)
@@ -264,7 +257,7 @@ object PushSender {
         myPublicKeyBase64: String,
         myPrivateKey: PrivateKey?,
         peerPublicKey: PublicKey?,
-        serverUrl: String = DEFAULT_NTFY_BASE_URL,
+        serverUrl: String = DEFAULT_RELAY_BASE_URL,
         onResult: (Boolean) -> Unit = {}
     ) {
         val topic = targetTopicId.trim().substringAfterLast("/")
@@ -282,7 +275,7 @@ object PushSender {
         val jsonPayload = buildPayloadJson(msg, myPrivateKey, peerPublicKey)
         val cleanSender = acknowledgerName.filter { it.code in 32..126 }
 
-        val targetBase = if (serverUrl.isNotBlank()) (if (serverUrl.endsWith("/")) serverUrl else "$serverUrl/") else DEFAULT_NTFY_BASE_URL
+        val targetBase = if (serverUrl.isNotBlank()) (if (serverUrl.endsWith("/")) serverUrl else "$serverUrl/") else DEFAULT_RELAY_BASE_URL
         val url = getDispatchUrl(targetBase, topic)
         val request = Request.Builder()
             .url(url)
@@ -309,7 +302,7 @@ object PushSender {
      * Deletes a message key from a Firebase RTDB channel to prevent infinite database growth.
      */
     fun deleteMessage(
-        serverUrl: String = DEFAULT_NTFY_BASE_URL,
+        serverUrl: String = DEFAULT_RELAY_BASE_URL,
         topicId: String,
         messageKey: String,
         onResult: (Boolean) -> Unit = {}
@@ -321,9 +314,9 @@ object PushSender {
             return
         }
 
-        val targetBase = if (serverUrl.isNotBlank()) (if (serverUrl.endsWith("/")) serverUrl else "$serverUrl/") else DEFAULT_NTFY_BASE_URL
+        val targetBase = if (serverUrl.isNotBlank()) (if (serverUrl.endsWith("/")) serverUrl else "$serverUrl/") else DEFAULT_RELAY_BASE_URL
         if (!targetBase.contains("firebaseio.com")) {
-            // Non-RTDB relays (e.g. standard ntfy) do not support / delete via key this way
+            // Non-RTDB relays do not support DELETE by key — skip silently
             onResult(true)
             return
         }

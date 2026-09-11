@@ -19,7 +19,7 @@ class FakePagerRepository : PagerRepository {
     private val keyPair = CryptoManager.generateKeyPair()
     private val contacts = mutableListOf<PairedContact>()
 
-    private var relayServerUrl: String = "https://ntfy.tedomum.fr/"
+    private var relayServerUrl: String = "https://paging-dr-howard-default-rtdb.firebaseio.com/"
     private var lastDismissedAlertTimestamp: Long = 0L
 
     override fun getMyTopicId(): String = topicId

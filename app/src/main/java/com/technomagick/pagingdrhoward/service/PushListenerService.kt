@@ -27,7 +27,6 @@ class PushListenerService : Service() {
 
     private var eventSource: EventSource? = null
     private var reconnectAttempt = 0
-    private var currentServerIndex = 0
     private var serviceStartTimeMs = System.currentTimeMillis()
     private var isConnected = false
     private var isConnecting = false
@@ -175,13 +174,7 @@ class PushListenerService : Service() {
         val myTopicId = repository.getMyTopicId()
 
         val userServer = repository.getRelayServerUrl()
-        val serverCandidates = mutableListOf<String>()
-        if (userServer.isNotBlank()) serverCandidates.add(userServer)
-        PushSender.FALLBACK_SERVERS.forEach { fb ->
-            if (!serverCandidates.contains(fb)) serverCandidates.add(fb)
-        }
-
-        val base = serverCandidates[currentServerIndex % serverCandidates.size]
+        val base = if (userServer.isNotBlank()) userServer else PushSender.DEFAULT_RELAY_BASE_URL
         val cleanTopic = myTopicId.trim().replace(Regex("^https?:/+[^/]+/"), "").replace(Regex("[^a-zA-Z0-9_-]"), "_")
 
         // If already connecting or connected to this exact server and topic, avoid tearing down stream
@@ -216,7 +209,7 @@ class PushListenerService : Service() {
         val factory = EventSources.createFactory(sseClient)
         eventSource = factory.newEventSource(request, object : EventSourceListener() {
             override fun onOpen(eventSource: EventSource, response: Response) {
-                Log.d(TAG, "Connected to ntfy push stream on $base ($myTopicId)")
+                Log.d(TAG, "Connected to push relay stream on $base ($myTopicId)")
                 isConnected = true
                 isConnecting = false
                 reconnectAttempt = 0 // Reset backoff on successful connection
@@ -258,15 +251,6 @@ class PushListenerService : Service() {
             override fun onFailure(eventSource: EventSource, t: Throwable?, response: Response?) {
                 isConnected = false
                 isConnecting = false
-                // If 429 Too Many Requests, cycle server
-                if (response?.code == 429) {
-                    currentServerIndex++
-                    Log.w(TAG, "Server $base returned 429 (Too Many Requests). Switching to next relay...")
-                } else if (reconnectAttempt >= 2) {
-                    // Failover after 2 consecutive connection failures on this server
-                    currentServerIndex++
-                    Log.w(TAG, "Connection failed on $base, failing over to next relay...")
-                }
                 schedulePoliteReconnect("Connection failure: ${t?.localizedMessage ?: response?.code}")
             }
         })
@@ -325,7 +309,7 @@ class PushListenerService : Service() {
 
             val sig = if (!key.isNullOrBlank()) "$senderTopic:$key" else "$senderTopic:$timestamp"
             val lastTime = recentlyTriggeredSignatures[sig]
-            // 5-minute dedup window — covers full service restart + ntfy replay lag
+            // 5-minute dedup window — covers full service restart + relay replay lag
             if (lastTime != null && (now - lastTime) < 300_000L) {
                 return false
             }

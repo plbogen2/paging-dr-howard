@@ -174,7 +174,7 @@ class PagerCoreEngine(
         }
 
         // Rule 4: Stale history filter — reject messages that predate this service session
-        // Use 90 second slack (up from 5s) to account for ntfy replaying messages buffered
+        // Use 90 second slack (up from 5s) to account for relay server replaying messages buffered
         // shortly before the service restarted. Also reject zero-timestamp messages when
         // startTimeMs is known, because we cannot verify they are fresh.
         if (startTimeMs > 0) {

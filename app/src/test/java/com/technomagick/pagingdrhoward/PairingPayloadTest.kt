@@ -28,7 +28,7 @@ class PairingPayloadTest {
     fun `test generate and parse pairing code with custom relay server roundtrip`() {
         val name = "Mom"
         val topicId = "pdh_mom_12345"
-        val serverUrl = "https://ntfy.adminforge.de/"
+        val serverUrl = "https://paging-dr-howard-default-rtdb.firebaseio.com/"
 
         val pairingCode = PairingPayload.generatePairingCode(name, topicId, "", "", serverUrl)
         val contact = PairingPayload.parsePairingCode(pairingCode)
