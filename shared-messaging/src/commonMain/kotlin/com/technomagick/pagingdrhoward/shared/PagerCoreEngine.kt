@@ -72,7 +72,7 @@ class PagerCoreEngine(
 ) {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
     private val dismissedKeys = mutableSetOf<String>()
-    private val processedSignatures = mutableSetOf<String>()
+    internal val processedSignatures = mutableSetOf<String>()
     var lastDismissedAlertTimestamp: Long = 0L
 
     fun isMessageDismissed(messageKey: String): Boolean = dismissedKeys.contains(messageKey)
@@ -162,14 +162,29 @@ class PagerCoreEngine(
             return if (!messageKey.isNullOrBlank()) EngineEvent.PurgeRequired(messageKey) else EngineEvent.Ignored
         }
 
-        // Rule 3: Replay protection (10 minutes drift)
-        if (timestamp > 0 && kotlin.math.abs(currentTimestamp - timestamp) > 600_000L) {
+        // Rule 3: Replay protection — reject messages more than 5 minutes old or 2 minutes in the future
+        // (tightened from 10 minutes; genuine pages are nearly instantaneous)
+        if (timestamp > 0 && (currentTimestamp - timestamp) > 300_000L) {
+            // Message is more than 5 minutes old — stale replay, purge it
+            return if (!messageKey.isNullOrBlank()) EngineEvent.PurgeRequired(messageKey) else EngineEvent.Ignored
+        }
+        if (timestamp > 0 && (timestamp - currentTimestamp) > 120_000L) {
+            // Message claims to be more than 2 minutes in the future — clock skew / spoofed, reject
             return if (!messageKey.isNullOrBlank()) EngineEvent.PurgeRequired(messageKey) else EngineEvent.Ignored
         }
 
-        // Rule 4: Stale history filter (messages prior to session connection)
-        if (startTimeMs > 0 && timestamp > 0 && timestamp < (startTimeMs - 5000L)) {
-            return if (!messageKey.isNullOrBlank()) EngineEvent.PurgeRequired(messageKey) else EngineEvent.Ignored
+        // Rule 4: Stale history filter — reject messages that predate this service session
+        // Use 90 second slack (up from 5s) to account for ntfy replaying messages buffered
+        // shortly before the service restarted. Also reject zero-timestamp messages when
+        // startTimeMs is known, because we cannot verify they are fresh.
+        if (startTimeMs > 0) {
+            if (timestamp == 0L) {
+                // No timestamp at all — cannot prove freshness, reject as potentially stale
+                return if (!messageKey.isNullOrBlank()) EngineEvent.PurgeRequired(messageKey) else EngineEvent.Ignored
+            }
+            if (timestamp < (startTimeMs - 90_000L)) {
+                return if (!messageKey.isNullOrBlank()) EngineEvent.PurgeRequired(messageKey) else EngineEvent.Ignored
+            }
         }
 
         // Rule 5: Timestamp dismissal cutoff for emergency pages

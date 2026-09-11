@@ -225,9 +225,15 @@ class PushListenerService : Service() {
             override fun onEvent(eventSource: EventSource, id: String?, type: String?, data: String) {
                 Log.d(TAG, "Received push event (type=$type): $data")
                 try {
-                    // Sync any recent dismissed keys and timestamp persisted by EmergencyAlertActivity
-                    repository.getDismissedMessageKeys().forEach { key ->
+                    // Sync dismissed keys and timestamp from SharedPreferences into engine.
+                    // This re-populates both dismissedKeys AND processedSignatures after a
+                    // service restart so already-dispatched messages can't replay through.
+                    val persistedDismissedKeys = repository.getDismissedMessageKeys()
+                    persistedDismissedKeys.forEach { key ->
                         coreEngine.markMessageDismissed(key)
+                        // Also add to processedSignatures so Rule 6 catches replays even
+                        // when the message key differs from the signature field
+                        coreEngine.processedSignatures.add(key)
                     }
                     val lastDismissed = repository.getLastDismissedAlertTimestamp()
                     if (lastDismissed > coreEngine.lastDismissedAlertTimestamp) {
@@ -314,11 +320,13 @@ class PushListenerService : Service() {
         @Synchronized
         fun shouldDispatchAlert(key: String?, senderTopic: String, timestamp: Long): Boolean {
             val now = System.currentTimeMillis()
-            recentlyTriggeredSignatures.entries.removeAll { (now - it.value) > 60_000L }
+            // Purge entries older than 5 minutes from the seen-signatures map
+            recentlyTriggeredSignatures.entries.removeAll { (now - it.value) > 300_000L }
 
             val sig = if (!key.isNullOrBlank()) "$senderTopic:$key" else "$senderTopic:$timestamp"
             val lastTime = recentlyTriggeredSignatures[sig]
-            if (lastTime != null && (now - lastTime) < 15_000L) {
+            // 5-minute dedup window — covers full service restart + ntfy replay lag
+            if (lastTime != null && (now - lastTime) < 300_000L) {
                 return false
             }
             recentlyTriggeredSignatures[sig] = now
